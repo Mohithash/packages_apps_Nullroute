@@ -1,0 +1,89 @@
+# Nullroute — attribution / deferred-deep-link carve-out.
+#
+# Overlay stage 7(e) of the compile pipeline (SPEC §6.5): applied as an ALLOW by
+# default, flipped to a block only when the user opts the "Attribution / deep
+# links" category IN.
+#
+# WHY THIS EXISTS. These are mobile-measurement platforms (MMPs). They are
+# tracking infrastructure — install attribution, cross-app identity graphs, the
+# usual — but delivery, ride-hailing, food and retail apps route their *product*
+# flows through the same SDK: the deferred deep link. Tap a shared restaurant
+# link, install the app, open it; the app calls the MMP to ask "which link
+# brought this install here?" and routes the user to that screen. Block the
+# call and the SDK does not fail fast, it waits out its own timeout — so the
+# symptom is an app that opens to a blank screen, or loops the onboarding
+# carousel forever, or "forgets" the promo code the user came in with.
+# See SPEC §10.3.
+#
+# Every referral, invite and promo flow on the device runs through these hosts.
+# That is why this is a category and not a default block: the breakage is
+# invisible at DNS level and looks exactly like a broken app.
+#
+# Syntax is a bare domain, i.e. K_SUFFIX: apex AND all subdomains. Several of
+# these apexes ARE the click domain (app.link, adj.st, sng.link, page.link) —
+# the short link itself resolves there, so the apex must be covered.
+#
+# NOT here on purpose: goo.gl (a general URL shortener, far past this
+# category's blast radius — it belongs to the urlshortener add-on) and
+# firebaseio.com (Realtime Database, a functional backend, not attribution).
+
+# ---------------------------------------------------------------------------
+# AppsFlyer
+appsflyer.com
+appsflyersdk.com
+onelink.me
+
+# ---------------------------------------------------------------------------
+# Adjust
+adjust.com
+adjust.io
+adj.st
+go.link
+
+# ---------------------------------------------------------------------------
+# Branch (incl. the legacy TUNE/Kochava-era link domains it absorbed)
+branch.io
+app.link
+test-app.link
+bnc.lt
+smart.link
+tlnk.io
+mobileapptracking.com
+measurementapi.com
+
+# ---------------------------------------------------------------------------
+# Kochava
+kochava.com
+kochava.net
+
+# ---------------------------------------------------------------------------
+# Singular
+singular.net
+sng.link
+
+# ---------------------------------------------------------------------------
+# Tenjin
+tenjin.io
+tenjin.com
+
+# ---------------------------------------------------------------------------
+# Airbridge
+airbridge.io
+abr.ge
+
+# ---------------------------------------------------------------------------
+# Firebase Dynamic Links
+#
+# Deprecated by Google but still shipping in a long tail of apps, and still the
+# link target printed on physical marketing material that users tap today.
+page.link
+app.goo.gl
+
+# ---------------------------------------------------------------------------
+# Yandex AppMetrica
+appmetrica.yandex.ru
+appmetrica.yandex.net
+
+# ---------------------------------------------------------------------------
+# Misc deferred-deep-link services
+deeplink.me

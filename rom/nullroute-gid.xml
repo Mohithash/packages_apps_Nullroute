@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Nullroute — the DAC half of the /data/misc/nullroute access story.
+    Installs to /system_ext/etc/permissions/nullroute-gid.xml
+
+    THE PROBLEM
+    -----------
+    /data/misc is mode 01771 system:misc. Nothing that is not uid system, uid
+    root, or a member of gid misc (AID_MISC = 9998) can even traverse it, let
+    alone reach /data/misc/nullroute/{index,ctl,log,priv} at 0770 system:misc.
+
+    SELinux is only half the gate. A process can hold
+    `allow nullroute_app nullroute_ctl_file:file { ... map ... }` and still get
+    EACCES from ordinary Unix permissions. Both halves have to line up.
+
+    THE REJECTED FIX
+    ----------------
+    android:sharedUserId="android.uid.system" would give the app uid 1000 and
+    solve this in one line. It is refused:
+      * deprecated and permanently un-migratable once shipped;
+      * it collapses the app into the system UID's sandbox, so a bug in the
+        blocklist parser — which chews on hundreds of thousands of lines of
+        attacker-influenced text from the internet — becomes a system-UID
+        compromise;
+      * it interferes with the /data/app sideload-update path we rely on for
+        out-of-band APK updates.
+    The sibling in-tree app packages/apps/Freezer correctly does not use it.
+
+    THE FIX
+    -------
+    SystemConfig parses <permission> elements with <group gid="..."/> children
+    from every etc/permissions directory it reads with the ALLOW_PERMISSIONS
+    flag, and /system_ext/etc/permissions is read with that flag. PackageManager
+    then adds the mapped gid to the supplementary group list of any package
+    holding the permission. This is the same machinery that maps
+    android.permission.INTERNET -> gid inet; we are not inventing a mechanism.
+
+    The app must ALSO declare the permission itself, with
+    android:protectionLevel="signature", and <uses-permission> it. The signature
+    check is trivially satisfied — the app is its own signer — and declaring it
+    in the manifest means the permission exists even if this file is somehow not
+    read, which turns a silent gid failure into a loud missing-permission one.
+
+    VERIFY ON DEVICE (Spike 2, SPEC.md §10.6):
+        adb shell cat /proc/$(adb shell pidof com.bestrom.nullroute)/status | grep Groups
+    must list 9998.
+
+    FALLBACK IF THE MAPPING DOES NOT TAKE
+    -------------------------------------
+    Relax the four state dirs from 0770 to 0775 in rom/init.nullroute.rc and let
+    SELinux be the sole gate. That is safe here specifically because the parent
+    /data/misc is 01771 and therefore already unreachable by untrusted_app, and
+    because MAC is enforcing on user builds. It is a fallback, not the design:
+    defence in depth is the point of doing it properly.
+-->
+<permissions>
+    <permission name="com.bestrom.nullroute.permission.STATE">
+        <!-- AID_MISC = 9998, the group that owns /data/misc. -->
+        <group gid="misc" />
+    </permission>
+</permissions>

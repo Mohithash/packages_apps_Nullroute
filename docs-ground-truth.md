@@ -109,3 +109,19 @@ A hosts file cannot do this at all; a VpnService can only approximate it via add
 Block response options at this point: return `EAI_NODATA`/`HOST_NOT_FOUND` (behaves as NXDOMAIN — apps fail fast,
 best for battery) or synthesize `0.0.0.0`/`::` via `getaddrinfo_numeric()` (matches hosts-file semantics, some
 apps handle it better). Should be a user-visible setting.
+
+## 12. MEASURED: cost of AOSP's hosts-file linear scan
+Reimplemented `_sethtent`/`_gethtent` verbatim from getaddrinfo.cpp (fopen + fgets + strcasecmp per
+name token) and timed one cache-missing lookup against real files:
+
+| hosts file | entries | size | us per miss |
+|---|---:|---:|---:|
+| L0 floor | 2,000 | 61 KB | 79 |
+| — | 20,000 | 600 KB | 931 |
+| StevenBlack unified | 93,516 | 2.6 MB | 3,996 |
+| Re-Malwack-scale | 224,553 | 6.1 MB | 9,310 |
+
+vs the NRDX index at 231 ns/lookup (BALANCED) / 268 ns (AGGRESSIVE) => ~40,000x.
+Measured on the build host with a warm page cache, so a phone is no better than this.
+This is the decisive quantitative argument for the resolver-index design over a hosts file,
+AND the justification for capping the baked L0 floor at ~2,000 entries.
