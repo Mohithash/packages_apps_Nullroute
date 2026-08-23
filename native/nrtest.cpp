@@ -67,6 +67,12 @@ int main(int argc, char** argv) {
     printf("read %zu lines, parsed %zu entries (%zu block, %zu allow)\n",
            lines, parsed, block.size(), allow.size());
 
+    /* The corpus-only prefix of `block`. The synthetic rules appended below
+     * deliberately include entries that are allowed or force-allowed, so the
+     * round-trip sampler must not draw from them or it reports its own fixtures
+     * as misses. */
+    const size_t corpus_n = block.size();
+
     /* ---- synthetic rules exercising every precedence branch --------------- */
     const std::string kApex = "nrtest-apex.example";       /* K_SUFFIX  */
     const std::string kWild = "nrtest-wild.example";       /* K_WILDCARD_ONLY */
@@ -157,9 +163,9 @@ int main(int argc, char** argv) {
     printf("\nreal corpus round-trip:\n");
     std::mt19937_64 rng(12345);
     size_t miss = 0, sampled = 0;
-    if (!block.empty()) {
+    if (corpus_n) {
         for (int i = 0; i < 20000; ++i) {
-            const BuildEntry& e = block[rng() % block.size()];
+            const BuildEntry& e = block[rng() % corpus_n];
             if (e.kind != K_SUFFIX) continue;
             ++sampled;
             Verdict v = nr_evaluate_index(ix, e.domain.c_str(), e.domain.size());
@@ -191,7 +197,7 @@ int main(int argc, char** argv) {
     std::vector<std::string> probe;
     probe.reserve(200000);
     for (int i = 0; i < 100000; ++i) {
-        const BuildEntry& e = block[rng() % block.size()];
+        const BuildEntry& e = block[rng() % (corpus_n ? corpus_n : block.size())];
         probe.push_back("www." + e.domain);
         probe.push_back("cdn" + std::to_string(i) + ".notblocked-" + std::to_string(i) + ".example");
     }
