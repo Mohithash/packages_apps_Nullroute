@@ -26,13 +26,14 @@
 #include "NrBuilder.h"
 #include "NrControl.h"
 #include "NrIndex.h"
+#include "NrMap.h"
 #include "NrQuery.h"
 #include "NrVerdict.h"
 
 /* ---------------------------------------------------------------------------
- * Paths (§7.1). Native-side constants live here rather than being duplicated
- * from core/Paths.kt: three separately-built binaries open these files and a
- * typo in one of them is a silent no-filter device.
+ * Paths (§7.1). NrMap.h owns the three the resolver opens — NR_PATH_INDEX_CURRENT,
+ * NR_PATH_CONTROL and NR_PATH_RING — and they are deliberately NOT restated here;
+ * the rest are app-side only and live with the code that uses them.
  * ------------------------------------------------------------------------- */
 #define NR_DIR_ROOT        "/data/misc/nullroute"
 #define NR_DIR_INDEX       NR_DIR_ROOT "/index"
@@ -40,11 +41,8 @@
 #define NR_DIR_LOG         NR_DIR_ROOT "/log"
 #define NR_DIR_PRIV        NR_DIR_ROOT "/priv"
 
-#define NR_PATH_CURRENT    NR_DIR_INDEX "/current.nrdx"
 #define NR_PATH_PREVIOUS   NR_DIR_INDEX "/previous.nrdx"
 #define NR_PATH_QUARANTINE NR_DIR_INDEX "/quarantine.nrdx"
-#define NR_PATH_CONTROL    NR_DIR_CTL   "/control.bin"
-#define NR_PATH_RING       NR_DIR_LOG   "/ring.bin"
 
 #define NR_DIR_ETC         "/system_ext/etc/nullroute"
 #define NR_PATH_BASELINE   NR_DIR_ETC "/baseline.domains.xz"
@@ -114,7 +112,7 @@ const char* nr_verdict_name(uint8_t verdict);
  * by humans as often as by the app, so parsing is forgiving. */
 bool nr_mode_parse(const char* s, uint8_t* out_mode);
 
-uint64_t nr_now_ms(void);
+/* nr_now_ms() / nr_mono_ms() come from NrMap.h — one clock helper, one owner. */
 
 /* ---------------------------------------------------------------------------
  * Properties. Thin wrappers over bionic so the callers stay readable; on a
@@ -221,6 +219,14 @@ struct NrExplain {
      * construction the last `verdict.depth` labels of the canonical name, which
      * is exactly the string the builder hashed. Empty when nothing matched. */
     char     matched_rule[NR_MAX_NAME + 1];
+
+    /* The allow entry that explains a PASS, read back out of the trace. This is
+     * presentation, not a second decision — "not blocked" is a useless answer
+     * when the user is asking why their allow rule did or did not take. */
+    bool     allow_hit = false;
+    uint8_t  allow_depth = 0, allow_kind = 0;
+    uint16_t allow_group = 0;
+    char     allow_rule[NR_MAX_NAME + 1];
 };
 
 void nr_explain(const NrIndex& ix, const char* host, size_t len, NrExplain* out);
@@ -241,6 +247,13 @@ const char* nr_expected_absence_note(const char* canon_name);
  * ------------------------------------------------------------------------- */
 struct NrVerifyReport {
     bool        ok = false;
+    /* Whether the bytes were reachable at all, which is a DIFFERENT question from
+     * whether they were a valid index and must not be inferred from `size`. "No
+     * index yet" is an expected state on a fresh boot; "an index that does not
+     * validate" is a corruption to act on. Collapsing the two makes `nrctl verify`
+     * exit 3 (unavailable) for a file that is right there and broken, and makes
+     * nativeVerify() throw where core/Generation.kt expects an ok:false report. */
+    bool        readable = false;
     std::string error;
     std::string path;
     uint64_t    size = 0;
@@ -347,6 +360,24 @@ bool nr_sha256_selftest(void);
  * Emitted as text from one place so `nrctl --json` and the JNI bridge produce
  * byte-identical shapes; the app's Query screen and the CLI must never be able
  * to disagree about a verdict.
+ *
+ * ONE PRODUCER IS NOT ENOUGH ON ITS OWN. The consumer is app/core/Native.kt, and
+ * nothing checks the two against each other at build time: a key renamed here
+ * compiles, links, ships, and makes the app report VerdictKind.UNKNOWN for every
+ * domain. So the keys Native.kt reads are normative —
+ *
+ *   query   verdict ("pass"|"block"|"redirect", LOWERCASE), depth, group,
+ *           rule (string|null), address (string|null)
+ *   verify  ok, error (string|null), fmt_version, generation, built_at_ms,
+ *           n_block, n_allow, n_redirect, bytes, sha256_ok
+ *   compile ok, generation, out_path, bytes, elapsed_ms, parsed_lines, block_in,
+ *           block_collapsed, allow_in, redirects, rejected,
+ *           sources[] {path, parsed, rejected, error (string|null)}
+ *
+ * — and `nrctl selftest` asserts a representative subset of them against real
+ * output rather than trusting this comment. Richer keys for the CLI's own use
+ * (matched_rule, the nested allow/redirect/trace objects, sha256_state) sit
+ * alongside them; adding is safe, renaming is not.
  * ------------------------------------------------------------------------- */
 void        nr_json_escape(const char* s, size_t n, std::string* out);
 std::string nr_json_query(const NrIndexRO& index, const char* index_path, const char* host);

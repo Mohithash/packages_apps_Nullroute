@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Blocklists are fetched over HTTPS or not at all.
+
+    A blocklist is a file that decides what the device can and cannot resolve.
+    Fetching one over cleartext would let anyone on the path decide which domains
+    this phone treats as advertising — including "none of them", by handing back
+    an empty list. Downloader.kt refuses non-HTTPS URLs in code as well; this is
+    the platform-level backstop, and it also covers a redirect chain that tries to
+    step down to http.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <!-- System CAs only. User-installed CAs are deliberately excluded:
+                 nothing here needs to be interceptable, and a list that can be
+                 rewritten by a locally-installed certificate is a list that can
+                 be switched off silently. -->
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

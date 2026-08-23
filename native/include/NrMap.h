@@ -67,6 +67,14 @@ enum NrSlotState : uint32_t {
  * One mapped generation of the index. Allocated from the static pool, never
  * freed. `index` is only meaningful while the slot is LIVE or RETIRED, and only
  * to a caller holding a reference.
+ *
+ * `refs` outlives the slot's identity. It is a strict +1/-1 discipline that is
+ * NEVER reset, because a reader that lost the publish race can still be between
+ * its fetch_add and its fetch_sub while the slot is being recycled. Resetting it
+ * would swallow the pending +1 and let the matching -1 wrap the next occupant's
+ * count to UINT32_MAX — a slot that can never be reclaimed again. A slot is
+ * therefore claimable only while refs reads exactly 0, and the publisher takes
+ * its own reference with an RMW rather than a store.
  */
 struct NrMapping {
     std::atomic<uint32_t> refs;

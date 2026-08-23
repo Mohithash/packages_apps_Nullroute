@@ -71,15 +71,30 @@ public:
      * H4: may files_getaddrinfo() skip its linear rescan of /system/etc/hosts?
      *
      * True only while L1 is genuinely authoritative — index mapped, kill switch
-     * clear, mode ENFORCE. Otherwise the L0 text layer must keep answering,
-     * because it is the fallback the degradation ladder ends on.
+     * clear, mode ENFORCE — AND the name is one L1 could actually speak for.
+     * Otherwise the L0 text layer must keep answering, because it is both the
+     * fallback the degradation ladder ends on and the only resolver for two
+     * names the device cannot live without.
      *
-     * `name` is optional so the argument-free call in §8.3 still compiles, but
-     * passing it matters: the hosts-probe.nullroute.invalid liveness probe is a
-     * literal line in /system/etc/hosts and is the ONLY evidence that the L0
-     * layer survived the build. Superseding the hosts scan for that name would
-     * make probe B fail on a completely healthy device and light up the
-     * "built-in list missing" warning forever.
+     * `name` is optional only so the argument-free form still compiles on a tree
+     * whose parameter is called something else. Omitting it makes this ALWAYS
+     * return false — H4 becomes a never-taken branch. That is deliberate: this
+     * hunk buys ~79 us on a cold query and nothing else, so an inert H4 costs a
+     * micro-optimisation while a wrong H4 costs `localhost`.
+     *
+     * Two names are exempted whatever the filter's state:
+     *   - single-label names (`localhost`, `ip6-localhost`, NetBIOS names).
+     *     /system/etc/hosts is the ONLY thing on Android that resolves loopback;
+     *     the mainline resolver has no built-in special case for it.
+     *   - anything under .nullroute.invalid. hosts-probe.nullroute.invalid is a
+     *     literal line in that file and is the only evidence the L0 layer
+     *     survived the build; superseding it would fail probe B on a healthy
+     *     device and light the "built-in list missing" warning forever.
+     *
+     * KNOWN LIMITATION: skipping files_getaddrinfo() also skips the per-netId
+     * customized hosts table (ResolverOptionsParcel.hosts, consulted at the end
+     * of that function). AOSP documents that table as local-testing-only and it
+     * is unset on a normal device, but a tree that starts using it must drop H4.
      */
     bool hostsLayerSuperseded(const char* name = nullptr);
 

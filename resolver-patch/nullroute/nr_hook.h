@@ -62,11 +62,12 @@ inline Verdict hook(const char* hostname, uid_t uid) {
 /*
  * H4. May files_getaddrinfo() skip its linear rescan of /system/etc/hosts?
  *
- * Pass the queried name when it is in scope — the L0 layer still has to answer
- * hosts-probe.nullroute.invalid, which is the only evidence that the built-in
- * hosts file survived the build. The default argument exists so the two-line
- * form in §8.3 still compiles on a tree where the parameter is named something
- * else.
+ * PASS THE QUERIED NAME. Without it this returns false unconditionally and the
+ * hunk is a never-taken branch, because a predicate that cannot see the name
+ * cannot tell `localhost` — which /system/etc/hosts is the only resolver for on
+ * Android — from an ad domain. The default argument exists so the two-line form
+ * still compiles on a tree whose parameter is named something else; it is a
+ * compile aid, not a supported configuration.
  */
 inline bool hostsLayerSuperseded(const char* name = nullptr) {
 #ifdef NULLROUTE_ENABLED

@@ -92,5 +92,17 @@
         <!-- Phase 4: Deep mode must not fight the data saver / metered policy. -->
         <permission name="android.permission.OBSERVE_NETWORK_POLICY"/>
 
+        <!-- Phase 1, and the only two entries here that the SHIPPING manifest
+             already requests. They are listed because the cost of being wrong is
+             asymmetric, not because AOSP is known to mark them privileged:
+             READ_DEVICE_CONFIG is signature|preinstalled and WRITE_DEVICE_CONFIG
+             is signature on the branches we have read, so on those branches these
+             two lines are inert. If either ever carries |privileged — an upstream
+             change we would find out about when a device stops booting — the
+             allowlist is frozen in the signed image and cannot be fixed by
+             pushing an APK. Over-listing is free; under-listing bricks. -->
+        <permission name="android.permission.READ_DEVICE_CONFIG"/>
+        <permission name="android.permission.WRITE_DEVICE_CONFIG"/>
+
     </privapp-permissions>
 </permissions>

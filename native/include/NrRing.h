@@ -19,7 +19,11 @@
 #define NR_RING_SLOTS 4096u
 #define NR_RING_REC   64u
 #define NR_RING_BYTES (NR_RING_SLOTS * NR_RING_REC + 4096u)  /* + one header page */
-#define NR_RING_NAME  45u
+/* The 26-byte record prefix plus one pad byte leaves exactly 37 for the name.
+ * The 64-byte record is the invariant that matters — a record must not straddle
+ * a cache line under a multi-producer writer — so the name is what gives. Longer
+ * names are truncated and flagged with NrLogRec::flags bit 0. */
+#define NR_RING_NAME  37u
 
 #ifdef __cplusplus
 namespace nr {

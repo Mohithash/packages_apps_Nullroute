@@ -39,7 +39,9 @@ https://raw.githubusercontent.com/badmojr/1Hosts/master/Lite/wildcards.txt # 1Ho
 # filter_1.txt instead would need an AdGuard-syntax parser, not this one.
 https://raw.githubusercontent.com/r-a-y/mobile-hosts/master/AdguardDNS.txt # AdGuard DNS
 
-# The Blocklist Project, ads (no-localhost form) — domains, Unlicense, 234,025.
+# The Blocklist Project, ads (no-localhost form) — domains, 234,025. Permissive:
+# the repo carries an Unlicense file and the generated list header now says MIT.
+# Either way it is bakeable; it is not baked for the reason below, not licensing.
 # Deliberately confined to AGGRESSIVE: it is broad, unreviewed relative to the
 # others, and it is the source most likely to be behind a false positive here.
 # It is NOT in BALANCED and must not be promoted into it (SPEC §7.6, correction 3).
@@ -54,8 +56,14 @@ https://blocklistproject.github.io/Lists/alt-version/ads-nl.txt # Blocklist Proj
 #
 # ⚠️ hagezi's blocklist-referral and whitelist-referral are the SAME 1,604
 # domains with opposite intent. Ship exactly one — the whitelist.
+#
+# These two, and only these two, are also SourceCatalog.alwaysAllowSources in
+# the app; the two lists must stay identical.
 @https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/whitelist-referral-onlydomains.txt # HaGeZi referral allowlist
 @https://raw.githubusercontent.com/hagezi/dns-blocklists/main/share/ultimate-known-issues.txt # HaGeZi known-issues allowlist
-@https://raw.githubusercontent.com/hagezi/dns-blocklists/main/share/ad-shield-subdomains.txt # HaGeZi ad-shield subdomains
-@https://raw.githubusercontent.com/hagezi/dns-blocklists/main/share/microsoft.txt # HaGeZi Microsoft allowlist
-@https://raw.githubusercontent.com/hagezi/dns-blocklists/main/share/apple-private-relay.txt # HaGeZi Apple Private Relay allowlist
+
+# share/ad-shield-subdomains.txt, share/apple-private-relay.txt and
+# share/microsoft.txt are NOT allow seeds — see the measurements recorded in
+# profiles/lite.txt. The ad-shield one matters most here: 86% of its 1,814
+# entries are blocked by Pro++, so allowing it would quietly undo a chunk of the
+# very profile the user picked for being aggressive.

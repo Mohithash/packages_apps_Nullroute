@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_home"
+        android:icon="@drawable/ic_nullroute"
+        android:title="@string/tab_home" />
+    <item
+        android:id="@+id/nav_profile"
+        android:icon="@drawable/ic_profile"
+        android:title="@string/tab_profile" />
+    <item
+        android:id="@+id/nav_update"
+        android:icon="@drawable/ic_update"
+        android:title="@string/tab_update" />
+    <item
+        android:id="@+id/nav_diagnostics"
+        android:icon="@drawable/ic_diagnostics"
+        android:title="@string/tab_diagnostics" />
+</menu>

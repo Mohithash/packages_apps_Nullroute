@@ -13,9 +13,14 @@ android {
 
     defaultConfig {
         applicationId = "com.bestrom.nullroute"
-        // Matches min_sdk_version in Android.bp. CtlReceiver.getSentFromUid()
-        // needs API 34, so the receiver refuses every broadcast below it rather
-        // than running with an unauthenticatable sender (see ctl/CtlReceiver.kt).
+        // Deliberately LOWER than Android.bp's min_sdk_version of 36, and this is
+        // not an oversight to be "fixed". The ROM build only ever runs on
+        // Android 17, so 36 is right there; the Gradle build is also the Phase 4
+        // stock-Android variant, which wants to reach further back. The sources
+        // stay valid for both because the only API above 33 they use —
+        // BroadcastReceiver.getSentFromUid(), API 34 — is behind a version check
+        // that REFUSES the broadcast below 34 rather than degrading to an
+        // unauthenticated sender. See ctl/CtlReceiver.kt.
         minSdk = 33
         targetSdk = 36
         versionCode = 1
@@ -45,12 +50,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlin {
-        compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-        }
-    }
-
     lint {
         // The Gradle build compiles against the public SDK while the shipping
         // build compiles against system_current, so lint flags privileged
@@ -66,6 +65,16 @@ android {
         // library as "no native support" and the app degrades to read-only
         // status reporting rather than crashing.
         jniLibs.useLegacyPackaging = false
+    }
+}
+
+// Top level, not nested inside `android { }`. `compilerOptions` belongs to the
+// Kotlin plugin's own project extension; a `kotlin { }` block written inside the
+// AGP extension only resolves at all because AGP's DSL carries no @DslMarker,
+// which is an accident to depend on rather than a contract.
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 

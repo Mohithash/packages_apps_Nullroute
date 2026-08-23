@@ -7,6 +7,11 @@
     lookup on the device regardless of which user made it. This file governs the
     *UI*, not the enforcement.
 
+    SYSTEM    — listed as well as FULL, and it is not redundant. On peridot user 0
+                is android.os.usertype.full.SYSTEM, which carries both flags, so
+                FULL alone would do. On a headless-system-user device it does not:
+                user 0 is SYSTEM-only, and with FULL alone the app would be absent
+                from the very user that owns the device. One line, no cost.
     FULL      — the owner and any secondary users get the app and can configure it.
     PROFILE   — work profiles get it too. A managed profile is exactly where a
                 user most wants to see what is being resolved, and the resolver
@@ -27,6 +32,7 @@
 -->
 <config>
     <install-in-user-type package="com.bestrom.nullroute">
+        <install-in user-type="SYSTEM" />
         <install-in user-type="FULL" />
         <install-in user-type="PROFILE" />
         <do-not-install-in user-type="android.os.usertype.profile.CLONE" />

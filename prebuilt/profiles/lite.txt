@@ -35,6 +35,10 @@ https://raw.githubusercontent.com/r-a-y/mobile-hosts/master/AdguardMobileSpyware
 # ---------------------------------------------------------------------------
 # Allowlist seeds — applied on every build, in every profile.
 #
+# These two, and only these two, are also SourceCatalog.alwaysAllowSources in
+# the app. The two lists must stay identical: the catalogue is what the fetch
+# path actually applies, and this file is what an OTA can change without an APK.
+#
 # ⚠️ hagezi's blocklist-referral and whitelist-referral are the SAME 1,604
 # domains with opposite intent. Ship exactly one. We ship the whitelist:
 # affiliate and referral link redirectors are load-bearing for shopping,
@@ -42,6 +46,23 @@ https://raw.githubusercontent.com/r-a-y/mobile-hosts/master/AdguardMobileSpyware
 # reports that are impossible for a user to trace.
 @https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/whitelist-referral-onlydomains.txt # HaGeZi referral allowlist
 @https://raw.githubusercontent.com/hagezi/dns-blocklists/main/share/ultimate-known-issues.txt # HaGeZi known-issues allowlist
-@https://raw.githubusercontent.com/hagezi/dns-blocklists/main/share/ad-shield-subdomains.txt # HaGeZi ad-shield subdomains
-@https://raw.githubusercontent.com/hagezi/dns-blocklists/main/share/microsoft.txt # HaGeZi Microsoft allowlist
-@https://raw.githubusercontent.com/hagezi/dns-blocklists/main/share/apple-private-relay.txt # HaGeZi Apple Private Relay allowlist
+
+# NOT allow seeds, and the reasons are measured, not assumed. A file living
+# under hagezi's share/ directory is not automatically an allowlist — the two
+# above are described as such in the upstream README, and these three are not:
+#
+#   share/ad-shield-subdomains.txt   1,814 entries, 1,552 of them (86%) are
+#     BLOCKED by HaGeZi Pro++. It is a blocklist fragment: the randomised
+#     subdomains AdShield rotates through to defeat filtering. Applying it as an
+#     allow would strip ~1,500 live ad hosts back out of every profile — the
+#     same inversion the referral warning above is about, with no symptom the
+#     user could ever notice.
+#   share/apple-private-relay.txt    22 Private Relay endpoints, 5 of which the
+#     doh-vpn-proxy-bypass add-on exists to block. Allowing them would silently
+#     nullify part of that add-on, to enable an iOS/macOS feature that does not
+#     exist on Android.
+#   share/microsoft.txt              A menu, not a recommendation: upstream
+#     describes it as "which domains to unblock for which feature". Applying all
+#     74 wholesale force-allows Microsoft telemetry (self.events.data.microsoft.com
+#     among them) in every profile including AGGRESSIVE, with no toggle. It
+#     belongs behind a category switch, next to the OEM-telemetry add-on.

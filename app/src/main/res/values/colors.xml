@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Status accent colours.
+
+    Three states, three colours, and no green for anything that is not fully
+    verified: "Limited" and "Paused" share the amber because in both cases the
+    user is less protected than they may think. Contrast is checked against the
+    Material3 surface in both light and dark (see values-night).
+-->
+<resources>
+    <color name="nr_status_ok">#FF1B873B</color>
+    <color name="nr_status_warn">#FFB26A00</color>
+    <color name="nr_status_bad">#FFBA1A1A</color>
+    <color name="nr_status_unknown">#FF6E7781</color>
+</resources>

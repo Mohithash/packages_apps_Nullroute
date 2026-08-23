@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Dark-theme accents. Lighter and less saturated than the light-theme values:
+    the same hues at full saturation vibrate against a dark surface and read as
+    an alarm even when the state is fine.
+-->
+<resources>
+    <color name="nr_status_ok">#FF6DD58C</color>
+    <color name="nr_status_warn">#FFF2B750</color>
+    <color name="nr_status_bad">#FFFFB4AB</color>
+    <color name="nr_status_unknown">#FF9AA4AE</color>
+</resources>

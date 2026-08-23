@@ -52,17 +52,36 @@ static std::atomic<bool>     g_kill{false};
 static std::atomic<bool>     g_kill_published{false};
 
 static inline void nr_refresh_kill() {
+    /*
+     * The AREA serial is the outer gate, and it gates everything — including the
+     * per-property serial read, which is why this is not simply an optimisation
+     * for the not-yet-found case.
+     *
+     * bionic bumps the area serial in BOTH __system_property_add() and
+     * __system_property_update(), so an unchanged area serial is proof that our
+     * property did not change either. That matters because
+     * __system_property_serial() is not merely a load: it spins on
+     * __futex_wait() while a writer holds the property's dirty bit. The window is
+     * microseconds and only while THIS property is mid-write, but "netd's DNS hot
+     * path can block on init" is not a sentence that belongs in this file at all.
+     *
+     * Steady state is therefore exactly one acquire load of a page netd already
+     * has mapped, per query, forever.
+     *
+     * (__system_property_area_serial() returns (uint32_t)-1 when the area is not
+     * mapped, which is why UINT32_MAX is the initial value of g_area_serial: in
+     * that state we stay quietly at "not killed" instead of retrying a lookup
+     * that cannot succeed. A real serial starts at 0 and cannot reach -1.)
+     */
+    const uint32_t area = __system_property_area_serial();
+    if (__builtin_expect(area == g_area_serial.load(std::memory_order_relaxed), 1)) return;
+    g_area_serial.store(area, std::memory_order_relaxed);
+
     const prop_info* pi = g_kill_pi.load(std::memory_order_relaxed);
-    if (__builtin_expect(pi == nullptr, 0)) {
+    if (pi == nullptr) {
         /* The property normally does not exist — it is only ever set by a user
-         * digging themselves out of a bad build. Re-running the trie lookup on
-         * every query for the rest of the device's uptime would be a real cost,
-         * so gate it on the global property-area serial, which changes only when
-         * SOME property anywhere changes. In the steady state that is one
-         * relaxed load. */
-        const uint32_t area = __system_property_area_serial();
-        if (area == g_area_serial.load(std::memory_order_relaxed)) return;
-        g_area_serial.store(area, std::memory_order_relaxed);
+         * digging themselves out of a bad build — so the trie lookup runs only
+         * when something, somewhere, changed a property. */
         pi = __system_property_find(NR_PROP_KILL);
         if (!pi) {
             g_kill.store(false, std::memory_order_relaxed);
@@ -73,7 +92,7 @@ static inline void nr_refresh_kill() {
     }
 
     const uint32_t s = __system_property_serial(pi);
-    if (__builtin_expect(s == g_kill_serial.load(std::memory_order_relaxed), 1)) return;
+    if (s == g_kill_serial.load(std::memory_order_relaxed)) return;
     g_kill_serial.store(s, std::memory_order_relaxed);
 
     bool killed = false;
@@ -102,8 +121,24 @@ static void publishRaw(const char* value) {
      * because this property, the logcat tag and the two .invalid probes are the
      * only evidence that survives a failure to map control.bin — the counters in
      * that page cannot report their own death. */
-    __system_property_set(NR_PROP_STATE, value);
+    const int rc = __system_property_set(NR_PROP_STATE, value);
     ALOGI("state=%s", value);
+    if (rc != 0) {
+        /*
+         * The set was refused — almost always a missing `set_prop(netd,
+         * nullroute_prop)` or no property_contexts entry for this name.
+         *
+         * This has to be loud, because the symptom is not "the property is
+         * wrong", it is "the property is EMPTY" — byte-identical to the
+         * catastrophic case where no hooked resolver ever ran a query. Without
+         * this line a triager reads an empty getprop and goes off rebuilding the
+         * APEX, when the filter was working perfectly the whole time and the
+         * defect was one line of policy.
+         */
+        ALOGE("could not publish %s=%s (rc=%d): the filter is RUNNING but cannot report its "
+              "state — check set_prop(netd, nullroute_prop) and property_contexts",
+              NR_PROP_STATE, value, rc);
+    }
 }
 
 /* ------------------------------------------------------------------------- */
@@ -211,6 +246,7 @@ void NrFilter::slowPath(NrControl* ctl, uint64_t want, uint32_t epoch) {
     __atomic_store_n(&ctl->mapped_generation, nm->generation, __ATOMIC_RELEASE);
     __atomic_store_n(&ctl->last_map_ms, nr_now_ms(), __ATOMIC_RELEASE);
     __atomic_store_n(&ctl->filter_abi, NR_FMT_VERSION, __ATOMIC_RELEASE);
+    __atomic_store_n(&ctl->fault_count, 0u, __ATOMIC_RELAXED);
 
     ALOGI("index mapped gen=%" PRIu64 " want=%" PRIu64 " bytes=%zu", nm->generation, want,
           nm->size);
@@ -221,9 +257,6 @@ void NrFilter::slowPath(NrControl* ctl, uint64_t want, uint32_t epoch) {
 void NrFilter::noteFault(const char* what, int errno_value, const char* field) {
     last_errno_ = errno_value;
     last_field_ = field;
-
-    NrControl* ctl = ctl_.load(std::memory_order_relaxed);
-    if (ctl) __atomic_fetch_add(&ctl->map_errors, 1u, __ATOMIC_RELAXED);
 
     /*
      * Soft vs hard, and why the distinction has to exist.
@@ -242,6 +275,15 @@ void NrFilter::noteFault(const char* what, int errno_value, const char* field) {
      */
     const bool soft = (errno_value == ENOENT) || (field && strcmp(field, "slots") == 0);
     if (!soft) ++faults_;
+
+    /* Telemetry, not the health signal. These counters are useful in Diagnostics
+     * and useless when the page they live in is the thing that failed to map —
+     * which is exactly why the property and the logcat line above exist. */
+    NrControl* ctl = ctl_.load(std::memory_order_relaxed);
+    if (ctl) {
+        __atomic_fetch_add(&ctl->map_errors, 1u, __ATOMIC_RELAXED);
+        __atomic_store_n(&ctl->fault_count, faults_, __ATOMIC_RELAXED);
+    }
 
     backoff_ms_ = backoff_ms_ ? (backoff_ms_ * 2u) : NR_BACKOFF_MIN_MS;
     if (backoff_ms_ > NR_BACKOFF_MAX_MS) backoff_ms_ = NR_BACKOFF_MAX_MS;
@@ -403,13 +445,42 @@ static inline bool nr_is_probe_name(const char* name) {
     return n > z && strncasecmp(name + (n - z), NR_PROBE_ZONE, z) == 0;
 }
 
+/*
+ * Does this name have at least two labels, ignoring a trailing root dot?
+ *
+ * This is the loopback guard, and it is the reason H4 is safe at all.
+ * /system/etc/hosts is not only the L0 blocklist: its first two lines are
+ * `127.0.0.1 localhost` and `::1 ip6-localhost`, and on Android that file is the
+ * ONLY thing that resolves them — the mainline resolver has no built-in
+ * loopback special case, which is exactly why system/core/rootdir ships those
+ * two lines. Skipping files_getaddrinfo() for a single-label name would send
+ * `localhost` to a DNS server and break loopback resolution device-wide.
+ *
+ * A single label is also a name nr_canonicalize() refuses outright, so L1 could
+ * never be authoritative for one. The two facts line up: exactly the names L1
+ * cannot speak for are the names L0 must keep answering.
+ */
+static inline bool nr_has_two_labels(const char* name) {
+    size_t n = strnlen(name, NR_MAX_NAME + 1);
+    if (n && name[n - 1] == '.') --n;          /* "localhost." is still one label */
+    for (size_t i = 0; i < n; ++i)
+        if (name[i] == '.') return true;
+    return false;
+}
+
 bool NrFilter::hostsLayerSuperseded(const char* name) {
     if (state_.load(std::memory_order_relaxed) == ST_DISABLED) return false;
     if (g_kill.load(std::memory_order_relaxed)) return false;
+
+    /* No name means no way to tell `localhost` from an ad domain, so the scan
+     * stands. H4 is a pure optimisation and is allowed to be inert; it is not
+     * allowed to be wrong. */
+    if (!name) return false;
+    if (!nr_has_two_labels(name)) return false;
     /* hosts-probe.nullroute.invalid is a literal line in /system/etc/hosts and
      * is the only proof that the L0 layer survived the build. Skipping the hosts
      * scan for it would fail probe B on a healthy device. */
-    if (name && nr_is_probe_name(name)) return false;
+    if (nr_is_probe_name(name)) return false;
 
     NrControl* ctl = ctl_.load(std::memory_order_acquire);
     if (!ctl) return false;

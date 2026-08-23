@@ -63,6 +63,13 @@ cc_library_static {
         "native/NrQuery.cpp",
         "native/NrMap.cpp",
     ],
+    // host_supported so the two cc_fuzz modules below can build a host variant.
+    // Without it Soong fails with "missing variant" the moment either fuzzer is
+    // analysed, and the F7 merge gate is what those fuzzers exist to be. NrMap.cpp
+    // is plain POSIX (open/fstat/mmap/clock_gettime) so the host variant is real
+    // code, not a stub — the host fuzzer exercises the same validate-and-map path
+    // that runs inside netd.
+    host_supported: true,
     header_libs: ["libnrformat_headers"],
     export_header_lib_headers: ["libnrformat_headers"],
     shared_libs: ["liblog"],
@@ -92,13 +99,22 @@ cc_library_static {
 // Exceptions stay ENABLED here (unlike libnrfilter): this side allocates freely
 // while merging hundreds of thousands of entries, and a std::bad_alloc that
 // unwinds out of a build job is far better than an abort in the app process.
+// FILE NAMES: the implementation of native/include/NrCtl.h is NrCtlCore.cpp, not
+// NrCtl.cpp. `native/NrCtl.cpp` and `native/nrctl.cpp` differ only in case and so
+// cannot coexist in a checkout on a case-insensitive filesystem; Soong does not
+// care, a developer whose checkout silently loses one of the two very much does.
+//
+// NrStrings.cpp (SPEC §5, the front-coded NR_SEC_STR rule-text blob) is NOT
+// listed: it does not exist yet and nothing in native/include declares anything
+// from it. Add it back to this list in the same commit that adds the file —
+// a src that does not exist is a hard Soong error on EVERY `mka`, including
+// `mka Nullroute`, not just on the module that names it.
 cc_library_static {
     name: "libnrcore",
     srcs: [
         "native/NrBuilder.cpp",
-        "native/NrStrings.cpp",
         "native/NrRingReader.cpp",
-        "native/NrCtl.cpp",
+        "native/NrCtlCore.cpp",
     ],
     static_libs: ["libnrfilter"],
     header_libs: ["libnrformat_headers"],
@@ -132,15 +148,19 @@ cc_binary {
     system_ext_specific: true,
 }
 
-// Runs at post-fs-data in its own SELinux domain. libcrypto is for the NRDX
-// sha256 verification; liblzma decompresses the baked baseline on first boot.
+// Runs at post-fs-data in its own SELinux domain. liblzma decompresses the baked
+// baseline on first boot.
+//
+// NOT libcrypto: nr_sha256() is a self-contained implementation in NrCtlCore.cpp
+// (nr_sha256_selftest() is its KAT), so the seeder does not pull BoringSSL into a
+// boot-path binary. If a future change does need it, add it here — do not assume
+// it is already linked because an older comment said so.
 cc_binary {
     name: "nullroute_seed",
     srcs: ["native/nullroute_seed.cpp"],
     static_libs: ["libnrcore"],
     shared_libs: [
         "libbase",
-        "libcrypto",
         "liblog",
         "liblzma",
         "libz",
@@ -157,10 +177,15 @@ cc_binary {
 // and must be able to link the platform-variant static libs above; declaring an
 // sdk_version would force an NDK variant and Soong would reject the dependency
 // on libnrcore/libnrfilter (F3).
+// jni_headers is required explicitly: <jni.h> has not been on the implicit
+// platform include path since it moved into libnativehelper's exported
+// `jni_headers` header library, and the failure is a compile error in a module
+// that "obviously" builds. Harmless if this tree still exports it globally.
 cc_library_shared {
     name: "libnrjni",
     srcs: ["native/jni_bridge.cpp"],
     static_libs: ["libnrcore"],
+    header_libs: ["jni_headers"],
     shared_libs: [
         "liblog",
         "libz",
@@ -297,24 +322,71 @@ android_app {
         "init.nullroute.rc",
         "nullroute_etc_hosts",
         "nullroute_baseline_domains",
+        "nullroute_baseline_domains_sha256",
         "nullroute_neverblock",
         "nullroute_antifraud",
         "nullroute_attribution",
         "nullroute_profile_lite",
         "nullroute_profile_balanced",
         "nullroute_profile_aggressive",
-        "NullrouteTileOverlay",
     ],
 }
 
-// Ships the tile ComponentName inside config_defaultQuickSettingsTiles so the
-// tile is present on a fresh flash, not merely available in the edit tray.
-runtime_resource_overlay {
-    name: "NullrouteTileOverlay",
-    resource_dirs: ["rom/rro/NullrouteTileOverlay/res"],
-    manifest: "rom/rro/NullrouteTileOverlay/AndroidManifest.xml",
-    sdk_version: "current",
-    system_ext_specific: true,
+// ---------------------------------------------------------------------------
+// NO QS-tile RRO. This is a deliberate removal, not an omission.
+// ---------------------------------------------------------------------------
+//
+// SPEC §8.8 item 29 asks for a runtime_resource_overlay that adds the tile
+// ComponentName to `config_defaultQuickSettingsTiles` on `android`. Three things
+// are wrong with that as written and the third is the one that matters:
+//
+//   1. There is no `config_defaultQuickSettingsTiles`. The default tile list is
+//      `R.string.quick_settings_tiles_default`.
+//   2. It does not live in package `android`; it is a SystemUI resource, so the
+//      overlay would have to target `com.android.systemui`. An RRO pointed at
+//      the wrong target package installs, validates and changes nothing — a
+//      silent no-op, which is the failure class this project exists to avoid.
+//   3. That resource is a single flat comma-separated string with no append
+//      mechanism. Overlaying it means hardcoding this ROM's entire default tile
+//      list in our repo. The next time Lineage adds or reorders a default tile,
+//      our copy silently wins and the user loses that tile — on a fresh flash
+//      only, so it would never reproduce on a developer's dirty device.
+//
+// The cost of not shipping it is small and bounded: a TileService with the
+// QS_TILE intent-filter is already enumerated in the QS edit tray with no
+// configuration at all, and the app can offer one-tap placement from its own UI
+// with TileService.requestAddTileService() (API 33+). Do that instead of
+// reinstating the overlay.
+
+// ---------------------------------------------------------------------------
+// Licensing of the baked list data
+// ---------------------------------------------------------------------------
+//
+// The package default above is Apache-2.0, which is correct for the code and for
+// the curated files we wrote (neverblock/antifraud/attribution and the profile
+// files carry URLs and our own domain selections). It is NOT correct for the two
+// artefacts derived from third-party lists: `prebuilt/hosts` and
+// `prebuilt/baseline.domains.xz` are built from AdAway (CC BY 3.0) and
+// StevenBlack (MIT) — see prebuilt/README.md §1.1. CC BY 3.0 is an attribution
+// licence, and the mechanism that discharges attribution on an Android image is
+// the generated NOTICE, which is fed from exactly this metadata. Labelling those
+// two files Apache-2.0 would drop AdAway from the NOTICE while everything still
+// builds and ships.
+//
+// No copyleft source is baked: gen_l0_hosts.py's assert_permissive() fails the
+// build on a GPL/MPL source, and the GPL-3.0 lists (HaGeZi, r-a-y) are fetched
+// and compiled ON DEVICE (SPEC §7.6, §10.5).
+//
+// If this tree's build/soong/licenses/Android.bp lacks the 3.0-specific kind,
+// fall back to "SPDX-license-identifier-CC-BY"; do not fall back to Apache-2.0.
+license {
+    name: "nullroute_baked_lists_license",
+    package_name: "Nullroute baked blocklist data",
+    license_kinds: [
+        "SPDX-license-identifier-CC-BY-3.0",
+        "SPDX-license-identifier-MIT",
+    ],
+    license_text: ["prebuilt/README.md"],
 }
 
 // ---------------------------------------------------------------------------
@@ -332,6 +404,7 @@ prebuilt_etc {
     src: "prebuilt/hosts",
     filename: "hosts",
     overrides: ["etc_hosts"],
+    licenses: ["nullroute_baked_lists_license"],
 }
 
 // ---------------------------------------------------------------------------
@@ -403,12 +476,31 @@ prebuilt_etc {
 // than distributed inside a verity-protected image. The profile files below
 // carry URLs, never list content.
 
+// ⚠ GENERATED ARTEFACT. Regenerate with tools/gen_baseline.py whenever the source
+// catalogue changes; Soong resolves `src:` at analysis time, so if it is ever
+// deleted EVERY `mka` in this repo fails, not just this module.
 prebuilt_etc {
     name: "nullroute_baseline_domains",
     system_ext_specific: true,
     sub_dir: "nullroute",
     src: "prebuilt/baseline.domains.xz",
     filename: "baseline.domains.xz",
+    licenses: ["nullroute_baked_lists_license"],
+}
+
+// The sidecar is NOT optional decoration. nullroute_seed's load_baseline() reads
+// <baseline>.sha256 and refuses to compile anything on a mismatch — but only *if
+// the file is there*. Ship the .xz without it and the integrity check that
+// gen_baseline.py went to the trouble of emitting silently degrades to "trust
+// whatever bytes are on the partition", with nothing anywhere to say so. These
+// two modules are a pair; never add one without the other.
+prebuilt_etc {
+    name: "nullroute_baseline_domains_sha256",
+    system_ext_specific: true,
+    sub_dir: "nullroute",
+    src: "prebuilt/baseline.domains.xz.sha256",
+    filename: "baseline.domains.xz.sha256",
+    licenses: ["nullroute_baked_lists_license"],
 }
 
 // The ALLOW_FORCE floor, compiled into every index the builder produces. A

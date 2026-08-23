@@ -21,20 +21,42 @@ namespace nr {
  * a reader racing a publish can always safely touch a slot's refcount. */
 static NrMapping g_slots[NR_MAP_SLOTS];
 
+/*
+ * Claim a free slot, WITHOUT resetting its refcount.
+ *
+ * That omission is the whole point. A reader that lost the publish race can
+ * still be between its `refs.fetch_add()` and its `refs.fetch_sub()` on a slot
+ * this function is recycling — it holds a reference to a mapping it is about to
+ * discover is no longer current, and its release is still coming. Storing 0 here
+ * would swallow that pending +1, and the matching -1 would then wrap the new
+ * occupant's refcount to UINT32_MAX. The slot would never satisfy
+ * `refs == 0` again, so it would never be reclaimed; four such events and
+ * nr_mapping_open() returns "slots" forever and index updates silently stop on a
+ * device whose health property still reads ok:<gen>.
+ *
+ * So: refs is a monotone +1/-1 discipline that outlives the slot's identity, and
+ * a slot is claimable only while it reads exactly 0. A straggler that bumps it
+ * between the load and the CAS merely costs us this slot on this pass; the next
+ * publish finds it back at 0.
+ */
 static NrMapping* claim_slot() {
     for (unsigned i = 0; i < NR_MAP_SLOTS; ++i) {
         uint32_t expected = NR_SLOT_FREE;
-        if (g_slots[i].state.compare_exchange_strong(expected, NR_SLOT_BUSY,
-                                                     std::memory_order_acq_rel,
-                                                     std::memory_order_relaxed)) {
-            NrMapping* m = &g_slots[i];
-            m->refs.store(0, std::memory_order_relaxed);
-            m->base = nullptr;
-            m->size = 0;
-            m->generation = 0;
-            m->index = NrIndex{};
-            return m;
+        if (!g_slots[i].state.compare_exchange_strong(expected, NR_SLOT_BUSY,
+                                                      std::memory_order_acq_rel,
+                                                      std::memory_order_relaxed))
+            continue;
+        NrMapping* m = &g_slots[i];
+        /* seq_cst, pairing with the reader's seq_cst fetch_add — see NrMap.h. */
+        if (m->refs.load(std::memory_order_seq_cst) != 0) {
+            m->state.store(NR_SLOT_FREE, std::memory_order_release);
+            continue;   /* a straggler is mid-acquire; leave it alone */
         }
+        m->base = nullptr;
+        m->size = 0;
+        m->generation = 0;
+        m->index = NrIndex{};
+        return m;
     }
     return nullptr;
 }
@@ -144,7 +166,10 @@ NrMapping* nr_mapping_open(const char* path, NrMapError* err) {
     m->size       = size;
     m->index      = ix;
     m->generation = ix.hdr->generation;
-    m->refs.store(1, std::memory_order_relaxed);   /* the publisher's own reference */
+    /* fetch_add, not store: a straggling reader may be holding a transient +1 on
+     * this recycled slot (see claim_slot). An RMW composes with it; a plain store
+     * would lose it and the straggler's -1 would then wrap the count. */
+    m->refs.fetch_add(1, std::memory_order_seq_cst);   /* the publisher's own reference */
     m->state.store(NR_SLOT_LIVE, std::memory_order_release);
     return m;
 }

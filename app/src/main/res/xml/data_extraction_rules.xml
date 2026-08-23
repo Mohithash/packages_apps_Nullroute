@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Nothing leaves the device.
+
+    `allowBackup="false"` already covers cloud backup; this file covers the
+    device-to-device transfer path as well. There is nothing here worth restoring
+    — the index is rebuilt from the profile in minutes — and the app's storage
+    would otherwise carry the download cache and, in Phase 3, a DNS query log.
+    Neither belongs in a transfer bundle.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="device_root" />
+        <exclude domain="device_file" />
+        <exclude domain="device_database" />
+        <exclude domain="device_sharedpref" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="device_root" />
+        <exclude domain="device_file" />
+        <exclude domain="device_database" />
+        <exclude domain="device_sharedpref" />
+    </device-transfer>
+</data-extraction-rules>

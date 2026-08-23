@@ -62,11 +62,35 @@ object Probes {
         /** Neither layer answered. */
         NOT_FILTERING,
 
-        /** User-requested. Probes cannot be interpreted in this state — see below. */
+        /**
+         * `mode = PAUSED`. L1 is inert (`nr_evaluate()` gates on mode) but L0 is
+         * not — see [OFF]. Probe A cannot be interpreted in this state.
+         */
         PAUSED,
 
-        /** Kill switch or mode=OFF. */
+        /**
+         * `mode = OFF`.
+         *
+         * This does **not** switch off the built-in list. `hostsLayerSuperseded()`
+         * (NrFilter.cpp) returns false unless `ctl.mode == NR_MODE_ENFORCE`, so
+         * the moment the user pauses or switches off, H4 stops skipping the L0
+         * scan and `/system/etc/hosts` is consulted again exactly as stock AOSP
+         * would. The baked ~2,000-entry floor keeps blocking.
+         *
+         * Getting this backwards in the copy would tell a user they have no
+         * protection when they measurably do, which is the same class of lie as
+         * claiming protection they do not have.
+         */
         OFF,
+
+        /**
+         * `persist.sys.nullroute.kill = 1`. A different state from [OFF] only in
+         * how it got there and how it is cleared: `hostsLayerSuperseded()` bails
+         * on `kill` as well as on a non-ENFORCE mode, so here too the baked hosts
+         * file is doing the filtering. The kill switch is persistent and only
+         * takes effect at boot, so the UI must not offer a toggle for it.
+         */
+        KILLED,
 
         /** Not sampled yet. */
         UNKNOWN,
@@ -94,7 +118,7 @@ object Probes {
          * observe the hook at all, and the UI says so.
          */
         fun status(): FilterStatus = when {
-            killSwitch -> FilterStatus.OFF
+            killSwitch -> FilterStatus.KILLED
             mode == ControlPage.MODE_OFF -> FilterStatus.OFF
             mode == ControlPage.MODE_PAUSED -> FilterStatus.PAUSED
             resolverHookLive && hostsLayerLive -> FilterStatus.PROTECTED
@@ -129,10 +153,16 @@ object Probes {
      */
     fun sample(): Health {
         val kill = SysProp.getBoolean(PROP_KILL)
-        // Skip the network round-trips when the kill switch is set: the filter is
-        // provably off, both probes would fail, and the answer would be
-        // indistinguishable from a genuine fault.
-        val idxLive = if (kill) false else resolves(IDX, IDX_EXPECT)
+        val mode = if (ControlPage.isMapped) ControlPage.mode else ControlPage.MODE_ENFORCE
+        // Probe A is skipped whenever it is provably going to fail: the kill
+        // switch short-circuits nr_filter_hook, and a non-ENFORCE mode makes
+        // nr_evaluate() return PASS before it ever reaches the redirect table.
+        // Issuing it anyway costs a full failing lookup for a .invalid name —
+        // resolver timeout and all, on every Home refresh — to learn a value we
+        // already know, and its result would be indistinguishable from a real
+        // fault. Probe B still runs: L0 is live in both of those states.
+        val idxLive =
+            if (kill || mode != ControlPage.MODE_ENFORCE) false else resolves(IDX, IDX_EXPECT)
         val hostsLive = resolves(HOSTS, HOSTS_EXPECT)
         val health = Health(
             resolverHookLive = idxLive,
@@ -140,7 +170,7 @@ object Probes {
             deepModeLive = false, // TODO(Phase 4): probe DEEP when the tunnel exists.
             stateProp = SysProp.get(PROP_FILTER_STATE, "unknown"),
             killSwitch = kill,
-            mode = if (ControlPage.isMapped) ControlPage.mode else ControlPage.MODE_ENFORCE,
+            mode = mode,
             heartbeat = ControlPage.readHeartbeatOrNull(),
             sampledAtMs = System.currentTimeMillis(),
         )
