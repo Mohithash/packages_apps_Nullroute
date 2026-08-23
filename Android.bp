@@ -112,8 +112,20 @@ cc_library_static {
 cc_library_static {
     name: "libnrcore",
     srcs: [
+        // NrBuilder.cpp is the serializer only. The line parser (NrParse.cpp),
+        // the suffix collapse (NrCollapse.cpp) and the UI-only front-coded rule
+        // text (NrStrings.cpp) are separate translation units so each can be
+        // reasoned about, timed and fuzzed without the others around it.
+        "native/NrParse.cpp",
+        "native/NrCollapse.cpp",
+        "native/NrStrings.cpp",
         "native/NrBuilder.cpp",
         "native/NrRingReader.cpp",
+        // The implementation of native/include/NrCtl.h is NrCtlCore.cpp, not
+        // NrCtl.cpp: `native/NrCtl.cpp` and `native/nrctl.cpp` differ only in
+        // case and cannot coexist in a checkout on a case-insensitive
+        // filesystem. Soong does not care; a developer whose checkout silently
+        // loses one of the two very much does.
         "native/NrCtlCore.cpp",
     ],
     static_libs: ["libnrfilter"],
@@ -183,7 +195,13 @@ cc_binary {
 // that "obviously" builds. Harmless if this tree still exports it globally.
 cc_library_shared {
     name: "libnrjni",
-    srcs: ["native/jni_bridge.cpp"],
+    srcs: [
+        "native/jni_bridge.cpp",
+        // Deep mode is in the SAME library on purpose: it must reach the same
+        // nr_evaluate() the resolver hook reaches, out of the same libnrcore, or
+        // the tunnel and the hook can disagree about a domain.
+        "native/jni_deep.cpp",
+    ],
     static_libs: ["libnrcore"],
     header_libs: ["jni_headers"],
     shared_libs: [
@@ -210,6 +228,9 @@ cc_binary_host {
     srcs: [
         "native/NrCanon.cpp",
         "native/NrQuery.cpp",
+        "native/NrParse.cpp",
+        "native/NrCollapse.cpp",
+        "native/NrStrings.cpp",
         "native/NrBuilder.cpp",
         "native/nrtest.cpp",
     ],
@@ -240,6 +261,23 @@ cc_fuzz {
     srcs: ["native/fuzz/nr_index_fuzzer.cpp"],
     static_libs: ["libnrfilter"],
     header_libs: ["libnrformat_headers"],
+    host_supported: true,
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+}
+
+// The one that matters most. nr_wire.h parses attacker-shaped DNS wire data
+// inside netd for the H3 raw-query hook, and netd's init stanza carries
+// `onrestart restart zygote` — so a parser bug here is a boot loop, not a failed
+// lookup. Header-only and dependency-free, hence no static_libs.
+cc_fuzz {
+    name: "nr_wire_fuzzer",
+    srcs: ["native/fuzz/nr_wire_fuzzer.cpp"],
+    header_libs: ["libnrformat_headers"],
+    include_dirs: ["packages/apps/Nullroute/resolver-patch/nullroute"],
     host_supported: true,
     cflags: [
         "-Wall",

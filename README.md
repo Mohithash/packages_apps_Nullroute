@@ -141,8 +141,36 @@ URLs; they never ship the lists. *(IANAL — flagged for review.)*
 
 ## Status
 
-The on-disk format, builder and matcher are implemented and verified against real corpora. Phase 0
-(baked hosts floor) and Phase 1 (resolver hook + index + a four-screen app) are the current build
-target. See `SPEC.md` for the full specification, `rom/README.md` for the ROM integration checklist and
-`resolver-patch/README.md` for how to apply and — more importantly — how to *verify* the resolver patch
-actually shipped, which is the one failure in this design that is invisible from userspace.
+| Phase | What it is | State |
+|---|---|---|
+| **0** | Baked `/system/etc/hosts` floor (2,054 lines, 52 KB, permissive licences only) | **built** |
+| **1** | Resolver hook (H1/H2/H4) + NRDX index + seeder + CLI + 4-screen app | **built** |
+| **2** | Compile/update pipeline, source catalogue, profiles, rules, canary, rollback, JobScheduler | **engine built, UI not** |
+| **3** | H3 raw-query hook, MPSC ring, CE-storage query log, importers, export, notifiers | **engine built, UI not** |
+| **4** | Deep mode (DNS-only VpnService, RFC 5737 aliases, TCP/53, watchdog) | **transport built, UI not** |
+| **5** | CNAME uncloaking, per-user policy, Advanced screen | **not built** |
+
+**Not built:** the Phase 2/3 screens (Rules, Query, Apps, Categories, Log), the Deep-mode and self-test
+screens, the Advanced screen, CNAME uncloaking, and the stock-Android Gradle flavour. The engines those
+screens drive are in place and compile; they are simply not yet reachable from the UI.
+
+**Not yet run on a device.** Everything below is source-level verification. The runtime behaviour of the
+patched resolver is unverified, and that is deliberately called out as the riskiest step in the whole
+design: a resolver patch that fails to ship inside the *activated* APEX looks identical to success from
+userspace. `resolver-patch/README.md` has the on-device commands that tell the two apart, and
+`tools/ci_verify_image.sh` asserts it against a built image.
+
+### Verification gates
+
+```bash
+tools/verify_source.sh <blocklist.txt>   # native: 17 TUs, 31 semantic tests, 3 fuzzers, patch apply/revert
+tools/verify_app.sh <dir-of-dep-jars>    # app: aapt2 resource compile + full Kotlin compile
+```
+
+Both are green as of the last commit: 17/17 native translation units clean at `-Wall -Wextra`, 31/31
+semantic tests, `nr_hostname_fuzzer` and `nr_index_fuzzer` clean over 40k runs each and `nr_wire_fuzzer`
+over 100k, the resolver patch applying and reverting byte-for-byte against the real tree, and 221 classes
+compiled from 51 Kotlin sources against real `android.jar` + androidx/Material.
+
+See `SPEC.md` for the full specification, `rom/README.md` for the ROM integration checklist, and
+`docs/integration-*.md` for the per-feature wiring notes.

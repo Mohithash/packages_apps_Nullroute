@@ -78,6 +78,32 @@
     <uses-permission android:name="android.permission.WRITE_DEVICE_CONFIG" />
 
     <!--
+        Phase 4, Deep mode. Both are normal protection level, so neither needs a
+        privapp-permissions entry and neither can affect boot under
+        ro.control_privapp_permissions=enforce. FOREGROUND_SERVICE_SPECIAL_USE is
+        API 34+; declaring it on a lower API is inert.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <!--
+        Phase 3, core/ForegroundAppTracker.kt — which app is in front of the
+        user, so the breakage notifier can attribute a burst of blocks to it
+        rather than to a bare uid. Both are signature|privileged and both are
+        ALREADY in the frozen privapp allowlist, so adding them here is an
+        APK-only change that cannot break boot.
+
+        PACKAGE_USAGE_STATS  UsageStatsManager.queryEvents — activity-resume
+                             events, the only API that reports what the user is
+                             actually looking at. Also needs the AppOp; without
+                             it queryEvents returns an empty cursor rather than
+                             throwing, which the tracker reports as "unknown".
+        REAL_GET_TASKS       the coarser getRunningAppProcesses fallback.
+    -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
+    <uses-permission android:name="android.permission.REAL_GET_TASKS" />
+
+    <!--
         Declared here as well as mapped in rom/nullroute-gid.xml so the
         permission exists even if the etc/permissions file is dropped from a
         build; the gid mapping is what actually does the work. `signature` is
@@ -211,5 +237,38 @@
                 <action android:name="com.bestrom.nullroute.action.CTL" />
             </intent-filter>
         </receiver>
+
+        <!--
+            Phase 4, Deep mode: the DNS-only VpnService.
+
+            exported + BIND_VPN_SERVICE + the android.net.VpnService action are
+            all mandatory — the framework binds this, and without the permission
+            any app could.
+
+            foregroundServiceType: Android 14 requires a type on every foreground
+            service and offers no VPN-specific one, so "specialUse" plus the
+            subtype property is the documented fallback. On a privileged build
+            "systemExempted" is also available; if you switch, keep the property
+            (inert for other types) and watch logcat for "startForeground
+            failed" — DeepVpnService catches that rather than crashing, so a
+            wrong type degrades quietly and has to be looked for.
+
+            android:directBootAware is deliberately ABSENT. Deep mode could
+            technically start before unlock, but VpnService.prepare() consent is
+            a user decision and the tunnel takes the device's only VPN slot;
+            neither belongs in the pre-unlock window.
+        -->
+        <service
+            android:name=".deep.DeepVpnService"
+            android:exported="true"
+            android:foregroundServiceType="specialUse"
+            android:permission="android.permission.BIND_VPN_SERVICE">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Filters DNS for every app on the device; the tunnel must stay established while the screen is off, or name resolution stops." />
+        </service>
     </application>
 </manifest>

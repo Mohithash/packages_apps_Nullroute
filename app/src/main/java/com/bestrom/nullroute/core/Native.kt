@@ -367,7 +367,82 @@ object Native {
         return value.ifEmpty { null }
     }
 
+    // ---- Deep mode (Phase 4) — native/jni_deep.cpp --------------------------
+    //
+    // A different shape from the three calls below, deliberately. Those answer
+    // cold questions and return JSON so that `nrctl --json` and the app cannot
+    // drift. These answer ONE question per DNS query on the Deep-mode packet
+    // path, so the verdict comes back as a packed Long (decoded by
+    // deep/DeepVerdict) with any redirect address written into a caller-owned
+    // array, and only the diagnostics call emits JSON.
+    //
+    // The session handle names a slot in a fixed native pool plus the generation
+    // that occupied it, so a call racing a close finds valid memory and a stale
+    // generation rather than a freed pointer.
+
+    /**
+     * Maps [indexPath] read-only for the Deep-mode tunnel, plus [controlPath]
+     * when the device has a control page. Returns 0 if the index could not be
+     * mapped — Deep mode must not establish a tunnel it cannot filter with.
+     * Never throws.
+     */
+    fun deepOpen(indexPath: String, controlPath: String?): Long {
+        if (!available) return 0L
+        return nativeDeepOpen(indexPath, controlPath)
+    }
+
+    /** Releases a session. Idempotent; safe with a stale handle. */
+    fun deepClose(handle: Long) {
+        if (available) nativeDeepClose(handle)
+    }
+
+    /**
+     * The verdict for one hostname, as raw canonical bytes. Returns a negative
+     * value for "no verdict", on which the caller relays the query untouched.
+     *
+     * [uid] must be a real application uid or a negative value; a negative uid
+     * skips the per-app policy gate rather than indexing it with a wrapped
+     * `uid_t`.
+     */
+    fun deepEvaluate(
+        handle: Long,
+        name: ByteArray,
+        len: Int,
+        uid: Int,
+        outAddr: ByteArray,
+    ): Long = nativeDeepEvaluate(handle, name, len, uid, outAddr)
+
+    /** 1 if a newer index generation was mapped, 0 if unchanged, -1 on failure. */
+    fun deepRefresh(handle: Long): Int = if (available) nativeDeepRefresh(handle) else -1
+
+    /** JSON session state for Diagnostics. Cold path. */
+    fun deepStatus(handle: Long): String = nativeDeepStatus(handle)
+
     // ---- raw JNI ------------------------------------------------------------
+    //
+    // These must stay inside `object Native` and keep these exact names.
+    // jni_deep.cpp exports
+    // Java_com_bestrom_nullroute_core_Native_nativeDeep{Open,Close,Evaluate,Refresh,Status}
+    // with a jobject receiver, which is what a Kotlin `object` member compiles
+    // to. Moving them to a different class changes the symbol and the failure is
+    // an UnsatisfiedLinkError at the first blocked query — not at load, and not
+    // at build.
+
+    private external fun nativeDeepOpen(indexPath: String, controlPath: String?): Long
+
+    private external fun nativeDeepClose(handle: Long)
+
+    private external fun nativeDeepEvaluate(
+        handle: Long,
+        name: ByteArray,
+        len: Int,
+        uid: Int,
+        outAddr: ByteArray,
+    ): Long
+
+    private external fun nativeDeepRefresh(handle: Long): Int
+
+    private external fun nativeDeepStatus(handle: Long): String
 
     private external fun nativeBuild(
         sourcePaths: Array<String>,

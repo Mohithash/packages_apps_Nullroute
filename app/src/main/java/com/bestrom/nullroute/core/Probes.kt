@@ -167,7 +167,12 @@ object Probes {
         val health = Health(
             resolverHookLive = idxLive,
             hostsLayerLive = hostsLive,
-            deepModeLive = false, // TODO(Phase 4): probe DEEP when the tunnel exists.
+            // The Deep-mode probe is only meaningful while the tunnel is up, and
+            // a failing .invalid lookup costs a full resolver timeout, so it is
+            // skipped rather than issued-and-ignored — the same reasoning as
+            // probe A under pause.
+            deepModeLive = com.bestrom.nullroute.deep.DeepVpnService.isRunning &&
+                resolves(DEEP, DEEP_EXPECT),
             stateProp = SysProp.get(PROP_FILTER_STATE, "unknown"),
             killSwitch = kill,
             mode = mode,
