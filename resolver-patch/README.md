@@ -10,8 +10,15 @@ nullroute/NrFilter.h        process-wide singleton, no lock on the hot path
 nullroute/NrFilter.cpp      generation watch, kill-switch cache, health property, self-disable
 nullroute/nr_hook.h         SIGNATURE-AGNOSTIC entry points — the whole rebase strategy
 nullroute/NrRingWriter.cpp  MPSC query-log producer
+nullroute/nr_wire.h         H3: bounded DNS wire codec, header-only, fuzzed alone
+nullroute/NrResSend.cpp     H3: parse the question, evaluate, synthesize the answer
 apply.sh                    idempotent, all-or-nothing patcher
 ```
+
+**H3 is optional; H1, H2 and H4 are not.** `android.net.DnsResolver.rawQuery()`
+did not always exist and a fork is free not to carry it, so `apply.sh` locates H3
+independently and reports it as *skipped* rather than failing — H1/H2/H4 cover
+~99% of traffic and must never be held hostage to it.
 
 The matcher itself is **not** here. `nr_evaluate()` lives in
 `native/NrQuery.cpp` and is linked in through `libnrfilter`, so the live filter,
@@ -47,9 +54,21 @@ four hunks are known good.
 
 | File | Change |
 |---|---|
-| `Android.bp` | `libnetd_resolv`: `srcs` += the two .cpp, `header_libs` += `libnrformat_headers`, `whole_static_libs` += `libnrfilter`, `cflags` += `-DNULLROUTE_ENABLED` |
+| `Android.bp` | `libnetd_resolv`: `srcs` += the three .cpp, `header_libs` += `libnrformat_headers`, `whole_static_libs` += `libnrfilter`, `cflags` += `-DNULLROUTE_ENABLED` |
 | `getaddrinfo.cpp` | **H1** at the top of `resolv_getaddrinfo()`'s real body; **H4** as the first statement of `files_getaddrinfo()` |
 | `gethnamaddr.cpp` | **H2** at the top of `resolv_gethostbyname()` |
+| `res_send.cpp`\* | **H3** at the top of `resolv_res_nsend()` — *only if this tree has a `ResNSendCommand`* |
+
+\* wherever `resolv_res_nsend()` is actually defined. `apply.sh` looks in
+`res_send.cpp`, `DnsProxyListener.cpp`, `DnsResolver.cpp` and `resolv.cpp`, in
+that order, and handles both known parameter shapes (`std::span` and the older
+pointer + length pair) and both spellings of the context parameter.
+
+`NrResSend.cpp` is added to `srcs` **unconditionally**, even on a tree where H3
+was skipped: it compiles standalone against nothing but `nr_hook.h`, `nr_wire.h`
+and libc, so the build shape stays identical everywhere, which is what keeps
+`--check` and the idempotency guarantee simple. Without its hunk it is simply
+never called.
 
 Every insertion is fenced with `// NULLROUTE-BEGIN` / `// NULLROUTE-END`, which
 is what makes re-running a no-op and `--revert` exact. Keep the whole thing as a
@@ -173,6 +192,26 @@ Both are single-label names, which `hostsLayerSuperseded()` never supersedes.
 If either of these fails, H4 is over-reaching and nothing else in this file
 matters until it is fixed — half the apps on the device use `localhost`.
 
+### 2.4b On device — H3, the raw-query path
+
+There is **no shell command that reaches H3**. `getent`, `ping` and `nslookup`
+all go through `getaddrinfo`; `android.net.DnsResolver.rawQuery()` is the only
+caller of `resolv_res_nsend()`, and only an app can make one. So verify it from
+the app's Diagnostics screen, which issues a `rawQuery` for a known-blocked name
+and for `idx-probe.nullroute.invalid` and reports the raw rcode:
+
+| Query | Expected |
+|---|---|
+| a blocked name, `TYPE_A` | `rcode = 3` (NXDOMAIN), one question echoed, one SOA in AUTHORITY |
+| a blocked name, `TYPE_TXT` | the same — NXDOMAIN is a statement about the NAME, not the type |
+| `idx-probe.nullroute.invalid`, `TYPE_A` | `rcode = 0` with one A record, `127.0.0.7` |
+| `idx-probe.nullroute.invalid`, `TYPE_AAAA` | `rcode = 0` with **no** answer (NODATA), one SOA — the name exists, that type does not |
+| an allowed name | whatever the network says; H3 did not touch it |
+
+If `apply.sh` reported H3 as skipped, all five fall through to the real query and
+`rawQuery` is simply unfiltered. That is a documented gap, not a fault — say so
+in Diagnostics rather than showing a failure.
+
 ### 2.5 On device — is it actually blocking?
 
 ```bash
@@ -291,9 +330,42 @@ on a healthy device. Soft failures back off 1 s → 60 s instead.
   `files_getaddrinfo()`, fed by `ResolverOptionsParcel.hosts`). AOSP documents
   that table as local-testing-only and nothing on a normal device populates it,
   but a tree that starts using it must drop the H4 hunk.
-- **Both `netcontext` and the out-pointer are null-checked** in H1 and H2. The
-  hunks run *before* each function's own argument validation — that is the point
-  of them — so they cannot borrow it. A null deref in netd restarts zygote.
+- **Both `netcontext` and the out-pointer are null-checked** in H1, H2 and H3.
+  The hunks run *before* each function's own argument validation — that is the
+  point of them — so they cannot borrow it. A null deref in netd restarts zygote.
+- **H3 hooks `resolv_res_nsend()`, never `res_nsend()`.** The first is the
+  external entry point whose only caller is DnsProxyListener's ResNSendCommand
+  handler; the second is the internal one that `res_nsearch()`/`res_nquery()` —
+  and therefore every `getaddrinfo()` lookup — also reaches. Hooking the internal
+  one would re-evaluate ~99% of the device's traffic several frames after H1
+  already decided it, double-count every block in the ring and in `q_blocked`,
+  and reach a second verdict on a question H1 had acted on.
+- **H3 answers CLASS IN only, and ignores QTYPE.** A CH or HS question is not a
+  name this policy has an opinion about. QTYPE is deliberately not filtered:
+  NXDOMAIN is a statement about the *name*, so a blocked domain is blocked for
+  TXT and SVCB exactly as it is for A, and letting an unusual QTYPE through would
+  be an obvious hole.
+- **H3 respects `response_mode`**: `EAI_NONAME` → `rcode 3` (NXDOMAIN),
+  `EAI_NODATA` → `rcode 0` with no answer. `NR_RESP_SINKHOLE` arrives as a
+  `V_REDIRECT` (rewritten in `evaluate()`), so the sinkhole mode is filtered on
+  this path too rather than silently not.
+- **A `V_REDIRECT` whose family does not match the QTYPE gets NOERROR/NODATA, not
+  NXDOMAIN.** A redirect says the name *exists*; NXDOMAIN would assert it does
+  not, which is both false and stickier — a caching client may apply an NXDOMAIN
+  to every type at once.
+- **H3 declines a question it cannot echo verbatim.** A QNAME carrying a
+  compression pointer, a label containing a literal `.` or an unprintable byte,
+  more than one question, a non-QUERY opcode — all fall through to the real
+  lookup. Every one of them is either malformed or a name whose presentation form
+  would be ambiguous, and evaluating an ambiguous name is how one wire name gets
+  treated as a different one.
+- **H3 leaves `event` untouched.** An intercepted query never reached a
+  transport, so filling in server statistics for it would put fiction into the
+  metrics. H1 does the same.
+- **If the caller's answer buffer cannot hold the SOA form**, H3 degrades to a
+  header-plus-question denial rather than falling open — the policy has already
+  reached a verdict, and letting the query proceed would resolve, for real, a
+  name we decided to intercept.
 
 ---
 

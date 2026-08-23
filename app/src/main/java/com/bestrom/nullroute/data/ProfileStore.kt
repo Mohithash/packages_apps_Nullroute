@@ -8,19 +8,41 @@ import java.io.File
 /**
  * Reads the shipped profile files and applies the user's overlay.
  *
- * The file model is deliberately Re-Malwack-compatible — a profile is a text file
- * of source URLs, one per line, with a `# DESC:` header and a `# OFF #` prefix for
- * "disabled but remembered". Compatibility is worth keeping because it is a good
- * format: it survives an OTA, it is diffable, and a user can read it.
+ * ## The three-file model
+ *
+ * ```
+ *   /system_ext/etc/nullroute/profiles/balanced.txt        immutable, signed image
+ *   /data/misc/nullroute/priv/profiles/balanced_added.txt  the user's additions
+ *   /data/misc/nullroute/priv/profiles/balanced_removed.txt tombstones, by URL
+ * ```
+ *
+ * The base file cannot be written — it is inside a verity-protected image — and
+ * that turns out to be the right design rather than a limitation. An OTA can
+ * change what BALANCED means without touching the user's edits, and a source the
+ * user removed does not come back the next time upstream adds it. A tombstone
+ * matches on **URL, not position**, so reordering the base file resurrects
+ * nothing.
+ *
+ * ## The line format
+ *
+ * Re-Malwack-compatible, because it is a good format: it survives an OTA, it is
+ * diffable, and a user can read it.
  *
  * ```
  * # DESC: Balanced — the default. Blocks most ads and trackers.
- * https://raw.githubusercontent.com/hagezi/.../multi-onlydomains.txt # HaGeZi Multi Pro
+ * https://…/multi-onlydomains.txt # HaGeZi Multi Pro
+ * @https://…/whitelist-referral-onlydomains.txt # Referral allowlist
  * # OFF # https://example.com/list.txt # Switched off by the user
  * ```
  *
- * The base file is read-only (it is in the signed image); edits go to
- * `/data/misc/nullroute/priv/profiles/<id>_added.txt` and `<id>_removed.txt`.
+ * `# OFF #` is **disabled but remembered**, not deletion: toggling a source off
+ * and on again keeps its label and its position, and — more importantly — a
+ * source the user switched off does not silently return when the profile is
+ * re-read. A leading `@` marks an **allowlist seed**, a property of how we chose
+ * to consume the list rather than of its contents, which is why it must be
+ * recorded rather than sniffed: HaGeZi's `blocklist-referral` and
+ * `whitelist-referral` are the same 1,604 domains with opposite intent, and no
+ * amount of parsing tells them apart.
  *
  * **Profile files carry URLs and nothing else.** No list body is ever shipped for
  * a copyleft source — see [Licence].
@@ -46,7 +68,7 @@ object ProfileStore {
             Log.w(TAG, "no profiles in ${Paths.builtinProfiles}; using the built-in table")
             SourceCatalog.builtInProfiles
         }
-        return base.map { applyOverlay(it) }
+        return (base + customProfiles(base)).map { applyOverlay(it) }
     }
 
     fun profile(context: Context, id: String): Profile? =
@@ -69,6 +91,31 @@ object ProfileStore {
             ?: return emptyList()
         return files.sortedBy { orderOf(it.nameWithoutExtension) }
             .mapNotNull { parseProfileFile(it.nameWithoutExtension, it, builtIn = true) }
+    }
+
+    /**
+     * A "custom" profile is nothing but an overlay with no base: an
+     * `<id>_added.txt` whose id matches no shipped file. That is the whole
+     * feature — there is no separate storage format and no migration when a
+     * future OTA starts shipping a base for the same id.
+     */
+    private fun customProfiles(base: List<Profile>): List<Profile> {
+        val dir = Paths.userProfiles
+        if (!dir.isDirectory) return emptyList()
+        val known = base.map { it.id }.toSet()
+        val files = dir.listFiles { f: File -> f.isFile && f.name.endsWith("_added.txt") }
+            ?: return emptyList()
+        return files.mapNotNull { f ->
+            val id = f.name.removeSuffix("_added.txt")
+            if (id.isEmpty() || id in known) return@mapNotNull null
+            Profile(
+                id = id,
+                displayName = id.replaceFirstChar { it.uppercase() },
+                description = readDescription(f).ifEmpty { "Your own list of sources." },
+                sources = emptyList(),
+                builtIn = false,
+            )
+        }
     }
 
     /** Lite < Balanced < Aggressive, then anything else alphabetically. */
@@ -103,6 +150,19 @@ object ProfileStore {
     } catch (t: Throwable) {
         Log.w(TAG, "unreadable profile ${file.path}: ${t.message}")
         null
+    }
+
+    private fun readDescription(file: File): String {
+        var out = ""
+        runCatching {
+            file.forEachLine { raw ->
+                val line = raw.trim()
+                if (out.isEmpty() && line.startsWith(DESC_PREFIX)) {
+                    out = line.removePrefix(DESC_PREFIX).trim()
+                }
+            }
+        }
+        return out
     }
 
     /**
@@ -149,12 +209,20 @@ object ProfileStore {
     private fun hostOf(url: String): String =
         runCatching { java.net.URI(url).host ?: url }.getOrDefault(url)
 
+    private fun formatLine(ref: SourceRef): String {
+        val prefix = if (ref.enabled) "" else "$OFF_MARKER "
+        val role = if (ref.role == SourceRole.ALLOW) "@" else ""
+        return "$prefix$role${ref.url} # ${ref.label}"
+    }
+
     // ---- user overlay -------------------------------------------------------
 
+    private fun addedFile(id: String) = File(Paths.userProfiles, "${id}_added.txt")
+    private fun removedFile(id: String) = File(Paths.userProfiles, "${id}_removed.txt")
+
     private fun applyOverlay(base: Profile): Profile {
-        val added = readOverlayFile(File(Paths.userProfiles, "${base.id}_added.txt"))
-            .map { it.copy(userAdded = true) }
-        val removed = readTombstones(File(Paths.userProfiles, "${base.id}_removed.txt"))
+        val added = readOverlayFile(addedFile(base.id)).map { it.copy(userAdded = true) }
+        val removed = readTombstones(removedFile(base.id))
         return if (added.isEmpty() && removed.isEmpty()) base
         else base.withOverlay(added, removed)
     }
@@ -178,9 +246,139 @@ object ProfileStore {
         return out
     }
 
-    // TODO(Phase 2): writing the overlay — enable/disable a source, add a custom
-    // URL, remove a shipped one, and the "custom" profile that is nothing but an
-    // overlay with no base. Phase 1 ships the picker read-only, because a source
-    // editor without the per-source counts, licence chips and version probe that
-    // make it comprehensible is worse than no editor at all.
+    // ---- writing the overlay ------------------------------------------------
+
+    /**
+     * Adds a source the user typed in.
+     *
+     * Everything a user adds lands in `_added.txt` even when the URL is one the
+     * catalogue knows: the catalogue is a description of what we ship, and
+     * conflating "we ship this" with "you asked for this" would make a later OTA
+     * that drops a source silently drop the user's choice with it.
+     */
+    fun addSource(profileId: String, ref: SourceRef): Boolean {
+        val existing = readOverlayFile(addedFile(profileId))
+        if (existing.any { it.url == ref.url }) return false
+        // Adding back something previously removed has to lift the tombstone, or
+        // the addition is written and then immediately filtered out again.
+        clearTombstone(profileId, ref.url)
+        return writeLines(
+            addedFile(profileId), ADDED_HEADER,
+            (existing + ref).map { formatLine(it) },
+        )
+    }
+
+    /**
+     * Removes a source. A user-added one is deleted outright; a shipped one gets
+     * a tombstone, because the base file is read-only.
+     */
+    fun removeSource(profileId: String, url: String): Boolean {
+        val existing = readOverlayFile(addedFile(profileId))
+        if (existing.any { it.url == url }) {
+            return writeLines(
+                addedFile(profileId), ADDED_HEADER,
+                existing.filterNot { it.url == url }.map { formatLine(it) },
+            )
+        }
+        val tombstones = readTombstones(removedFile(profileId))
+        if (url in tombstones) return false
+        return writeLines(
+            removedFile(profileId), REMOVED_HEADER,
+            (tombstones + url).toList(),
+        )
+    }
+
+    /**
+     * Switches a source off or on **without forgetting it** — the `# OFF #`
+     * marker rather than a tombstone.
+     *
+     * A shipped source that the user disables is recorded as a disabled copy in
+     * `_added.txt`, which shadows the base entry through
+     * [Profile.withOverlay]'s URL match plus the tombstone. That is one more file
+     * write than a "disabled URLs" list would need, and it buys the property that
+     * matters: the state is expressible in the same text format the user and
+     * `nrctl` already read.
+     */
+    fun setSourceEnabled(
+        context: Context,
+        profileId: String,
+        url: String,
+        enabled: Boolean,
+    ): Boolean {
+        val base = profile(context, profileId) ?: return false
+        val ref = base.sources.firstOrNull { it.url == url } ?: return false
+        if (ref.enabled == enabled) return false
+
+        val overlay = readOverlayFile(addedFile(profileId))
+        val updated = ref.copy(enabled = enabled)
+        val merged = if (overlay.any { it.url == url }) {
+            overlay.map { if (it.url == url) updated else it }
+        } else {
+            overlay + updated
+        }
+        if (!writeLines(addedFile(profileId), ADDED_HEADER, merged.map { formatLine(it) })) {
+            return false
+        }
+
+        // The shipped entry has to be shadowed, or withOverlay() keeps the base
+        // copy and drops ours as a duplicate, and nothing appears to change.
+        return if (ref.userAdded) true else tombstone(profileId, url)
+    }
+
+    private fun tombstone(profileId: String, url: String): Boolean {
+        val tombstones = readTombstones(removedFile(profileId))
+        if (url in tombstones) return true
+        return writeLines(removedFile(profileId), REMOVED_HEADER, (tombstones + url).toList())
+    }
+
+    private fun clearTombstone(profileId: String, url: String) {
+        val tombstones = readTombstones(removedFile(profileId))
+        if (url !in tombstones) return
+        writeLines(removedFile(profileId), REMOVED_HEADER, (tombstones - url).toList())
+    }
+
+    /** Drops every user edit for a profile, returning it to what the ROM ships. */
+    fun resetOverlay(profileId: String): Boolean {
+        val a = addedFile(profileId)
+        val r = removedFile(profileId)
+        var ok = true
+        if (a.exists()) ok = a.delete() && ok
+        if (r.exists()) ok = r.delete() && ok
+        return ok
+    }
+
+    /** True when this profile has been edited, for the "Reset" affordance. */
+    fun hasOverlay(profileId: String): Boolean =
+        addedFile(profileId).isFile || removedFile(profileId).isFile
+
+    private const val ADDED_HEADER =
+        "# Nullroute — sources you added or switched off for this profile.\n" +
+            "# The shipped profile is read-only; this file overlays it.\n" +
+            "# \"# OFF # <url>\" means disabled but remembered."
+
+    private const val REMOVED_HEADER =
+        "# Nullroute — sources removed from the shipped profile, one URL per line.\n" +
+            "# Matched by URL, not position, so reordering the base file changes nothing."
+
+    private fun writeLines(file: File, header: String, lines: List<String>): Boolean {
+        val tmp = File(file.parentFile, "${file.name}.tmp")
+        return try {
+            file.parentFile?.mkdirs()
+            tmp.bufferedWriter().use { out ->
+                out.appendLine(header)
+                lines.forEach { out.appendLine(it) }
+            }
+            if (!tmp.renameTo(file)) {
+                tmp.delete()
+                Log.w(TAG, "could not commit ${file.name}")
+                false
+            } else {
+                true
+            }
+        } catch (t: Throwable) {
+            runCatching { tmp.delete() }
+            Log.w(TAG, "writing ${file.name} failed: ${t.message}")
+            false
+        }
+    }
 }

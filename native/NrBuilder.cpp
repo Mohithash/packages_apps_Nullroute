@@ -1,186 +1,23 @@
 /*
- * Nullroute — blocklist parsing, suffix collapse and NRDX serialization.
+ * Nullroute — NRDX serialization.
  *
  * App-side only. netd never links this; it only ever maps the finished artifact
  * read-only.
+ *
+ * The line parser lives in NrParse.cpp and the suffix collapse in
+ * NrCollapse.cpp; this file is now only the part that turns normalized records
+ * into the exact bytes the resolver mmaps.
  */
 #include "NrBuilder.h"
 #include "NrQuery.h"
 
 #include <string.h>
 #include <algorithm>
-#include <unordered_map>
-#include <unordered_set>
 
 namespace nr {
 
 // ---------------------------------------------------------------------------
-// Parsing
-// ---------------------------------------------------------------------------
-
-static inline bool valid_label(const char* p, size_t n) {
-    if (n == 0 || n > NR_MAX_LABEL) return false;
-    if (p[0] == '-' || p[n - 1] == '-') return false;
-    for (size_t i = 0; i < n; ++i) {
-        const char c = p[i];
-        const bool ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-                        c == '-' || c == '_';
-        if (!ok) return false;
-    }
-    return true;
-}
-
-/* A domain we are willing to put in the index. Rejects IP literals, single-label
- * names and anything with an invalid label — a blocklist that smuggles in
- * "0.0.0.0" as a *domain* would otherwise become an entry that matches nothing
- * and costs a table slot forever. */
-static bool valid_domain(const std::string& s) {
-    if (s.empty() || s.size() > NR_MAX_NAME) return false;
-    if (nr_is_ip_literal(s.c_str())) return false;
-    size_t start = 0, labels = 0;
-    for (size_t i = 0; i <= s.size(); ++i) {
-        if (i == s.size() || s[i] == '.') {
-            if (!valid_label(s.data() + start, i - start)) return false;
-            start = i + 1;
-            ++labels;
-        }
-    }
-    return labels >= 2;
-}
-
-static void lower_trim(std::string* s) {
-    size_t b = 0, e = s->size();
-    while (b < e && (unsigned char)(*s)[b] <= ' ') ++b;
-    while (e > b && (unsigned char)(*s)[e - 1] <= ' ') --e;
-    *s = s->substr(b, e - b);
-    for (auto& c : *s) if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
-    while (!s->empty() && s->back() == '.') s->pop_back();
-}
-
-bool nr_parse_line(const char* line, size_t len,
-                   std::string* domain, RuleKind* kind, bool* is_allow) {
-    *is_allow = false;
-    *kind = K_SUFFIX;
-
-    std::string s(line, len);
-    /* strip inline comments */
-    const size_t hash = s.find('#');
-    if (hash != std::string::npos) s.resize(hash);
-    const size_t excl = s.find("//");
-    if (excl != std::string::npos) s.resize(excl);
-    lower_trim(&s);
-    if (s.empty()) return false;
-
-    /* dnsmasq: address=/example.com/0.0.0.0 */
-    if (s.rfind("address=/", 0) == 0) {
-        const size_t e = s.find('/', 9);
-        if (e == std::string::npos) return false;
-        s = s.substr(9, e - 9);
-    }
-
-    /* ABP exception must be tested before the plain ABP form. */
-    if (s.rfind("@@", 0) == 0) { *is_allow = true; s = s.substr(2); }
-
-    if (s.rfind("||", 0) == 0) {
-        s = s.substr(2);
-        const size_t caret = s.find_first_of("^$");
-        if (caret != std::string::npos) s.resize(caret);
-        *kind = K_SUFFIX;
-    } else if (s.rfind("@", 0) == 0) {
-        *is_allow = true;
-        s = s.substr(1);
-    }
-
-    if (s.rfind("!", 0) == 0) { *is_allow = true; *kind = K_FORCE; s = s.substr(1); }
-
-    /* hosts format: "<ip> <domain> [more...]" — take the second field only.
-     * Multiple names on one hosts line are legal but essentially never used by
-     * the lists we consume; taking the first is the conservative reading. */
-    const size_t sp = s.find_first_of(" \t");
-    if (sp != std::string::npos) {
-        std::string first = s.substr(0, sp);
-        if (nr_is_ip_literal(first.c_str())) {
-            std::string rest = s.substr(sp + 1);
-            lower_trim(&rest);
-            const size_t sp2 = rest.find_first_of(" \t");
-            if (sp2 != std::string::npos) rest.resize(sp2);
-            s = rest;
-        } else {
-            return false;   /* not a form we recognise */
-        }
-    }
-
-    if (s.rfind("*.", 0) == 0) {
-        if (*kind != K_FORCE) *kind = K_WILDCARD_ONLY;
-        s = s.substr(2);
-    } else if (s.rfind("=", 0) == 0) {
-        if (*kind != K_FORCE) *kind = K_EXACT;
-        s = s.substr(1);
-    }
-
-    lower_trim(&s);
-    /* A leading "www." is not stripped: it is a real label and the suffix walk
-     * already covers it via the apex entry. */
-    if (!valid_domain(s)) return false;
-
-    /* Localhost aliases appear at the top of every hosts file. Indexing them
-     * would blackhole loopback. */
-    if (s == "localhost" || s == "localhost.localdomain" ||
-        s == "local" || s == "ip6-localhost" || s == "ip6-loopback" ||
-        s == "broadcasthost" || s == "ip6-localnet" || s == "ip6-mcastprefix" ||
-        s == "ip6-allnodes" || s == "ip6-allrouters" || s == "ip6-allhosts") {
-        return false;
-    }
-
-    *domain = s;
-    return true;
-}
-
-// ---------------------------------------------------------------------------
-// Suffix collapse
-// ---------------------------------------------------------------------------
-
-size_t nr_collapse(std::vector<BuildEntry>* entries) {
-    /* Only a K_SUFFIX entry can subsume a descendant: a K_WILDCARD_ONLY does not
-     * cover the apex and a K_EXACT covers only itself. */
-    std::unordered_set<std::string> suffixes;
-    suffixes.reserve(entries->size() * 2);
-    for (const auto& e : *entries)
-        if (e.kind == K_SUFFIX) suffixes.insert(e.domain);
-
-    const size_t before = entries->size();
-    std::unordered_set<std::string> seen;
-    seen.reserve(entries->size() * 2);
-
-    std::vector<BuildEntry> kept;
-    kept.reserve(entries->size());
-
-    for (auto& e : *entries) {
-        /* exact duplicate (same domain, same kind) */
-        std::string key = e.domain;
-        key.push_back('\x01');
-        key.push_back((char)('0' + (int)e.kind));
-        if (!seen.insert(key).second) continue;
-
-        /* covered by a broader K_SUFFIX ancestor? */
-        bool covered = false;
-        size_t pos = e.domain.find('.');
-        while (pos != std::string::npos) {
-            const std::string parent = e.domain.substr(pos + 1);
-            if (parent.find('.') == std::string::npos) break;   /* stop at the TLD */
-            if (suffixes.count(parent)) { covered = true; break; }
-            pos = e.domain.find('.', pos + 1);
-        }
-        if (covered) continue;
-
-        kept.push_back(std::move(e));
-    }
-    *entries = std::move(kept);
-    return before - entries->size();
-}
-
-// ---------------------------------------------------------------------------
-// Serialization
+// Table construction
 // ---------------------------------------------------------------------------
 
 static uint32_t next_pow2_cap(size_t n) {
@@ -192,12 +29,36 @@ static uint32_t next_pow2_cap(size_t n) {
 
 static size_t align_up(size_t v) { return (v + NR_PAGE - 1) & ~(size_t)(NR_PAGE - 1); }
 
+/*
+ * Precedence when two rules for the same name land in one slot. Lower wins.
+ *
+ * This is §6.5 step 5's "dedupe with kind precedence", and it is not
+ * hypothetical: `promotion.xmeye.net` arrives from 1Hosts as `*.promotion.xmeye.net`
+ * (K_WILDCARD_ONLY) and from AdGuard Mobile Ads as `0.0.0.0 promotion.xmeye.net`
+ * (K_SUFFIX). First-writer-wins keeps the wildcard, and the apex — which two
+ * separate lists agreed should be blocked — quietly resolves. The corpus
+ * round-trip in nrtest catches exactly this, which is why it is a suite check
+ * and not a comment.
+ *
+ * K_FORCE is strongest because it is the never-block floor: an ordinary allow
+ * for the same name must never be able to demote it.
+ */
+static inline unsigned kind_rank(uint8_t k) {
+    switch (k) {
+        case K_FORCE:         return 0;
+        case K_SUFFIX:        return 1;
+        case K_WILDCARD_ONLY: return 2;
+        case K_EXACT:         return 3;
+        default:              return 4;
+    }
+}
+
 /* Fill an open-addressed table. Returns false if a slot cannot be placed, which
  * can only happen if the capacity was mis-sized — a build-time bug, not a
  * runtime condition. */
 static bool fill_table(std::vector<uint64_t>& tbl, uint32_t cap,
                        const std::vector<BuildEntry>& entries, uint64_t seed,
-                       std::vector<uint8_t>& bloom) {
+                       std::vector<uint8_t>& bloom, size_t* conflicts) {
     for (const auto& e : entries) {
         uint64_t h; uint8_t nlab;
         if (!nr_rule_hash(e.domain.data(), e.domain.size(), seed, &h, &nlab)) continue;
@@ -210,7 +71,20 @@ static bool fill_table(std::vector<uint64_t>& tbl, uint32_t cap,
                 placed = true;
                 break;
             }
-            if (nr_slot_fp(tbl[i]) == want) { placed = true; break; }  /* dup hash */
+            if (nr_slot_fp(tbl[i]) == want) {
+                /* Same name (or a 1-in-2^46 fingerprint collision). Keep the
+                 * rule that governs the most names; the group follows the kind,
+                 * because the group is what the log and the Query screen name as
+                 * the reason, and naming a source whose rule did not fire is
+                 * worse than naming none. */
+                const uint8_t had = nr_slot_kind(tbl[i]);
+                if (kind_rank((uint8_t)e.kind) < kind_rank(had)) {
+                    tbl[i] = nr_slot_pack(h, (uint8_t)e.kind, e.group);
+                }
+                if (had != (uint8_t)e.kind && conflicts) ++*conflicts;
+                placed = true;
+                break;
+            }
             i = (i + 1) & (size_t)(cap - 1);
         }
         if (!placed) return false;
@@ -231,11 +105,41 @@ static void label_stats(const std::vector<BuildEntry>& v,
     }
 }
 
+// ---------------------------------------------------------------------------
+// Serialization
+// ---------------------------------------------------------------------------
+
+bool nr_wrap_strings_blob(const std::vector<uint8_t>& payload,
+                          uint64_t generation, uint64_t built_at_ms, uint64_t hash_seed,
+                          std::vector<uint8_t>* out) {
+    if (!out || payload.empty()) return false;
+
+    out->assign(align_up(NR_PAGE + payload.size()), 0);
+    memcpy(out->data() + NR_PAGE, payload.data(), payload.size());
+
+    /* An ordinary NrHeader with a single populated section. That is what lets
+     * `nrctl verify`, nr_index_open_ro() and the sha256 seal work on the sidecar
+     * unchanged — and it is why the resolver, which reads sec[NR_SEC_STR] never,
+     * pays nothing for it. */
+    NrHeader h{};
+    h.magic       = NR_MAGIC;
+    h.fmt_version = (uint16_t)NR_FMT_VERSION;
+    h.flags       = 0;
+    h.generation  = generation;
+    h.built_at_ms = built_at_ms;
+    h.hash_seed   = hash_seed ? hash_seed : NR_FNV_OFFSET;
+    h.sec[NR_SEC_STR].off = NR_PAGE;
+    h.sec[NR_SEC_STR].len = payload.size();
+    memcpy(out->data(), &h, sizeof(h));
+    return true;
+}
+
 bool nr_build_index(std::vector<BuildEntry> block,
                     std::vector<BuildEntry> allow,
                     std::vector<BuildRedirect> redirects,
                     uint64_t generation, uint64_t built_at_ms, uint64_t hash_seed,
-                    std::vector<uint8_t>* out, BuildStats* stats) {
+                    std::vector<uint8_t>* out, BuildStats* stats,
+                    std::vector<uint8_t>* strings_out) {
     if (!hash_seed) hash_seed = NR_FNV_OFFSET;
 
     stats->block_in = block.size();
@@ -264,8 +168,10 @@ bool nr_build_index(std::vector<BuildEntry> block,
     std::vector<NrRedir> rt(rt_cap);
     memset(rt.data(), 0, rt.size() * sizeof(NrRedir));
 
-    if (bt_cap && !fill_table(bt, bt_cap, block, hash_seed, bf)) return false;
-    if (at_cap && !fill_table(at, at_cap, allow, hash_seed, af)) return false;
+    size_t conflicts = 0;
+    if (bt_cap && !fill_table(bt, bt_cap, block, hash_seed, bf, &conflicts)) return false;
+    if (at_cap && !fill_table(at, at_cap, allow, hash_seed, af, &conflicts)) return false;
+    stats->kind_conflicts = conflicts;
 
     for (const auto& r : redirects) {
         uint64_t h; uint8_t nlab;
@@ -344,6 +250,25 @@ bool nr_build_index(std::vector<BuildEntry> block,
     stats->at_cap = at_cap;
     stats->rt_cap = rt_cap;
     stats->bytes  = off;
+
+    /* ---- NR_SEC_STR, last, because it consumes the entry vectors ---------
+     * Built from the COLLAPSED sets so the count the Rules screen shows is the
+     * count that is actually in the index. Failing to build it is not fatal to
+     * the index — the resolver never reads it — but it is reported as zero
+     * rather than silently pretending an empty blob is a valid one. */
+    if (strings_out) {
+        strings_out->clear();
+        std::vector<uint8_t> payload;
+        NrStringsStats sstats;
+        if (nr_strings_build(std::move(block), std::move(allow),
+                             (uint16_t)NR_STR_RESTART_DEFAULT, &payload, &sstats) &&
+            nr_wrap_strings_blob(payload, generation, built_at_ms, hash_seed, strings_out)) {
+            stats->strings_bytes = strings_out->size();
+            stats->strings_count = sstats.count;
+        } else {
+            strings_out->clear();
+        }
+    }
     return true;
 }
 

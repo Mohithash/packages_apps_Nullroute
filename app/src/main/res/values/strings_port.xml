@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Import / export strings.
+
+    Owned by the import-export feature; Android merges multiple values files, so
+    nothing here belongs in res/values/strings.xml.
+
+    House rule, same as the status copy in strings.xml: never claim an effect that
+    has not happened. An import writes rules; it does not change what is blocked
+    until the next compile, and every string below that touches the subject says
+    so rather than letting the user infer it.
+-->
+<resources>
+
+    <!-- ==== entry points ================================================== -->
+
+    <string name="port_section_import">Import rules</string>
+    <string name="port_section_backup">Backup and diagnostics</string>
+
+    <string name="port_import_adaway">Import an AdAway backup</string>
+    <string name="port_import_adaway_summary">Reads AdAway\'s .json export. AdAway itself is left running and untouched.</string>
+
+    <string name="port_import_bindhosts">Import a bindhosts folder</string>
+    <string name="port_import_bindhosts_summary">Reads blacklist.txt, whitelist.txt, sources.txt and custom.txt.</string>
+    <string name="port_import_bindhosts_help">Nullroute cannot reach /data/adb/bindhosts. Copy that folder somewhere you can browse to — internal storage is fine — then pick it here.</string>
+
+    <string name="port_import_hosts">Import a hosts or domain list</string>
+    <string name="port_import_hosts_summary">A hosts file, a list of domains, an AdGuard/ABP filter list, or a dnsmasq configuration.</string>
+
+    <string name="port_export_settings">Back up settings</string>
+    <string name="port_export_settings_summary">Your rules, profile and preferences, saved where you choose. Contains no browsing history.</string>
+
+    <string name="port_restore_settings">Restore settings</string>
+    <string name="port_restore_settings_summary">Replaces your current rules and preferences with a backup\'s.</string>
+
+    <string name="port_diagnostics_bundle">Save a diagnostics bundle</string>
+    <string name="port_diagnostics_bundle_summary">Everything a maintainer needs to diagnose a fault. Domain names are removed.</string>
+
+    <!-- ==== import preview ================================================ -->
+
+    <string name="port_preview_title">Import from %1$s</string>
+    <string name="port_preview_reading">Reading…</string>
+    <string name="port_preview_confirm">Add these rules</string>
+    <string name="port_preview_cancel">Cancel</string>
+
+    <string name="port_preview_nothing">Nothing to add.</string>
+    <string name="port_preview_all_present">Nothing to add — all %1$d rules are already in your list.</string>
+
+    <string name="port_count_block">%1$d to block</string>
+    <string name="port_count_allow">%1$d to allow</string>
+    <string name="port_count_redirect">%1$d to redirect</string>
+    <string name="port_count_sources">%1$d lists to subscribe to</string>
+    <string name="port_count_already">%1$d already in your rules</string>
+    <string name="port_count_skipped">%1$d lines skipped</string>
+
+    <!--
+        The exact-versus-subdomain choice. Off by default: a hosts file has no
+        wildcards, so turning every entry into a subdomain rule would start
+        blocking names the user was never blocking. See importer/ImportModel.kt.
+    -->
+    <string name="port_option_broaden">Also block subdomains</string>
+    <string name="port_option_broaden_summary">A hosts file blocks exactly the names it lists. Turn this on to block everything under them too — stronger, and more likely to break something.</string>
+
+    <string name="port_option_sources">Also subscribe to its lists</string>
+    <string name="port_option_sources_summary">This device will start downloading from %1$d addresses in the backup.</string>
+
+    <!-- ==== conflicts ===================================================== -->
+
+    <string name="port_conflicts_header">Worth knowing before you confirm</string>
+    <string name="port_conflict_more">…and %1$d more.</string>
+    <string name="port_conflict_floor">%1$s will never be blocked — it is on the built-in never-block list.</string>
+    <string name="port_conflict_block_over_allow">%1$s: you allow this, and allowing wins. The block will not apply.</string>
+    <string name="port_conflict_allow_over_block">%1$s: you block this. Allowing wins, so your block stops applying.</string>
+    <string name="port_conflict_redirect">%1$s is already sent somewhere else. The import replaces it.</string>
+
+    <string name="port_skipped_header">Lines Nullroute did not import</string>
+    <string name="port_skipped_row">Line %1$d: %2$s</string>
+
+    <!-- ==== results ======================================================= -->
+
+    <!--
+        The second sentence is not padding. Rules enter the index at the next
+        compile; a user who is told "imported" and then sees an ad has been
+        misled by the omission, not by the delay.
+    -->
+    <string name="port_import_done">Imported %1$d rules. They take effect at the next list update.</string>
+    <string name="port_import_done_action">Update now</string>
+    <string name="port_import_failed">Import failed: %1$s</string>
+
+    <string name="port_export_done">Settings saved (%1$d KiB).</string>
+    <string name="port_export_failed">Could not save: %1$s</string>
+
+    <string name="port_restore_title">Restore this backup?</string>
+    <string name="port_restore_body">Saved %1$s. It contains %2$s.</string>
+    <string name="port_restore_replaces">This replaces your current rules and preferences. It does not merge them, and it cannot be undone.</string>
+    <string name="port_restore_confirm">Replace my settings</string>
+    <string name="port_restore_done">Restored %1$d files. Your rules take effect at the next list update.</string>
+    <string name="port_restore_failed">Could not restore: %1$s</string>
+
+    <!-- ==== diagnostics bundle ============================================ -->
+
+    <string name="port_diag_redact">Remove domain names</string>
+    <string name="port_diag_redact_summary">On. Your own rules are reported as counts. Your query log is never included, in either setting.</string>
+    <string name="port_diag_unredacted_warning">This bundle will list the domains in your own allow and block rules. Only send it somewhere you trust.</string>
+    <string name="port_diag_done">Diagnostics saved (%1$d KiB).</string>
+    <string name="port_diag_failed">Could not save diagnostics: %1$s</string>
+    <string name="port_diag_copied">Copied. Domain names removed.</string>
+
+    <!--
+        Shown next to both export actions. Worth stating once, plainly: the whole
+        point of the CE-storage split is that a locked device leaks no DNS
+        history, and an export that could carry it would undo that in one tap.
+    -->
+    <string name="port_privacy_note">Nullroute never writes your query log to an exported file.</string>
+
+</resources>

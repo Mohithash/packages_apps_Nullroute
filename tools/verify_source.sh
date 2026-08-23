@@ -56,6 +56,23 @@ cat > "$WORK/stub/log/log.h" <<'H'
 H
 
 INC=(-I "$WORK/stub" -I "$ROOT/native/include" -I "$ROOT/resolver-patch/nullroute")
+
+# The library translation units the test and fuzz targets link. Named once, used
+# three times: the compile pipeline is deliberately several TUs (parse, collapse,
+# build, strings) and a link line that lists them by hand in three places is a
+# link line that goes stale in two of them the next time one is added.
+#
+# NrMap.cpp, NrCtlCore.cpp and NrRingReader.cpp are absent on purpose — they are
+# device-side, and neither nrtest nor either fuzzer calls into them.
+CORE_SRC=(
+    "$ROOT/native/NrCanon.cpp"
+    "$ROOT/native/NrQuery.cpp"
+    "$ROOT/native/NrParse.cpp"
+    "$ROOT/native/NrCollapse.cpp"
+    "$ROOT/native/NrStrings.cpp"
+    "$ROOT/native/NrBuilder.cpp"
+)
+
 JNI_INC=()
 for cand in "${JAVA_HOME:-}/include" /usr/lib/jvm/*/include; do
     [ -d "$cand" ] && { JNI_INC=(-I "$cand" -I "$cand/linux"); break; }
@@ -66,7 +83,7 @@ for f in "$ROOT"/native/*.cpp "$ROOT"/resolver-patch/nullroute/*.cpp; do
     base="$(basename "$f")"
     extra=()
     case "$base" in
-        jni_bridge.cpp)
+        jni_bridge.cpp|jni_deep.cpp)
             if [ ${#JNI_INC[@]} -eq 0 ]; then skip "$base (no JDK headers found)"; continue; fi
             extra=("${JNI_INC[@]}") ;;
     esac
@@ -80,8 +97,7 @@ done
 
 step "Semantic test suite"
 if "$CXX" -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter "${INC[@]}" \
-    "$ROOT/native/NrCanon.cpp" "$ROOT/native/NrQuery.cpp" "$ROOT/native/NrBuilder.cpp" \
-    "$ROOT/native/nrtest.cpp" -o "$WORK/nrtest" 2> "$WORK/err.txt"; then
+    "${CORE_SRC[@]}" "$ROOT/native/nrtest.cpp" -o "$WORK/nrtest" 2> "$WORK/err.txt"; then
     ok "nrtest built"
     if [ $# -gt 0 ]; then
         if "$WORK/nrtest" "$@" > "$WORK/t.log" 2>&1; then
@@ -99,8 +115,8 @@ fi
 
 step "Fuzzers (merge gate)"
 if "$CXX" -fsanitize=fuzzer,address -std=c++17 -O1 -g "${INC[@]}" \
-    "$ROOT/native/NrCanon.cpp" "$ROOT/native/NrQuery.cpp" "$ROOT/native/NrBuilder.cpp" \
-    "$ROOT/native/fuzz/nr_hostname_fuzzer.cpp" -o "$WORK/fz_host" 2> "$WORK/err.txt"; then
+    "${CORE_SRC[@]}" "$ROOT/native/fuzz/nr_hostname_fuzzer.cpp" \
+    -o "$WORK/fz_host" 2> "$WORK/err.txt"; then
     if "$WORK/fz_host" -runs=40000 -max_len=300 > "$WORK/f1.log" 2>&1; then
         ok "nr_hostname_fuzzer: 40k runs clean"
     else
@@ -111,8 +127,8 @@ else
 fi
 
 if "$CXX" -fsanitize=fuzzer,address -std=c++17 -O1 -g "${INC[@]}" \
-    "$ROOT/native/NrCanon.cpp" "$ROOT/native/NrQuery.cpp" "$ROOT/native/NrBuilder.cpp" \
-    "$ROOT/native/fuzz/nr_index_fuzzer.cpp" -o "$WORK/fz_idx" 2> "$WORK/err.txt"; then
+    "${CORE_SRC[@]}" "$ROOT/native/fuzz/nr_index_fuzzer.cpp" \
+    -o "$WORK/fz_idx" 2> "$WORK/err.txt"; then
     # This is the one that matters: the index is written by the app and mapped
     # inside netd, whose init stanza carries `onrestart restart zygote`.
     if "$WORK/fz_idx" -runs=40000 -max_len=8192 > "$WORK/f2.log" 2>&1; then
@@ -122,6 +138,29 @@ if "$CXX" -fsanitize=fuzzer,address -std=c++17 -O1 -g "${INC[@]}" \
     fi
 else
     bad "nr_index_fuzzer failed to build"; head -12 "$WORK/err.txt" | sed 's/^/        /'
+fi
+
+# ONE translation unit, on purpose: nr_wire.h is header-only and depends on
+# nothing else in the project, so this target links no index, no control page and
+# no filter. A crash is therefore unambiguously a parser bug rather than a
+# fixture bug — which is the property the header is written to preserve, and the
+# reason CORE_SRC is deliberately absent from this line.
+if "$CXX" -fsanitize=fuzzer,address -std=c++17 -O1 -g "${INC[@]}" \
+    "$ROOT/native/fuzz/nr_wire_fuzzer.cpp" -o "$WORK/fz_wire" 2> "$WORK/err.txt"; then
+    # The most consequential of the three. The other two fuzz inputs we merely
+    # receive — a hostname handed over through a length-prefixed IPC, and a file
+    # this project wrote itself. This one fuzzes the only place in Nullroute that
+    # parses NETWORK-SHAPED bytes: length-prefixed labels, offsets, and
+    # compression pointers that address back into the same buffer, inside netd,
+    # on data any app on the device chooses via DnsResolver.rawQuery(). Hence the
+    # longer budget.
+    if "$WORK/fz_wire" -runs=100000 -max_len=600 > "$WORK/f3.log" 2>&1; then
+        ok "nr_wire_fuzzer: 100k runs clean"
+    else
+        bad "nr_wire_fuzzer crashed"; tail -20 "$WORK/f3.log" | sed 's/^/        /'
+    fi
+else
+    bad "nr_wire_fuzzer failed to build"; head -12 "$WORK/err.txt" | sed 's/^/        /'
 fi
 
 step "Resolver patch against a real DnsResolver tree"
@@ -134,7 +173,24 @@ if [ -d "$DNS_SRC" ]; then
             && ok "idempotent on re-run" || bad "re-run was not a no-op"
         bash "$ROOT/resolver-patch/apply.sh" --check "$WORK/DnsResolver" > /dev/null 2>&1 \
             && ok "--check detects applied state" || bad "--check disagrees with apply"
-        for f in getaddrinfo.cpp gethnamaddr.cpp; do
+
+        # H3 is the one hunk allowed to be absent (a tree with no ResNSendCommand
+        # has no raw-query path to hook), so report which way it went rather than
+        # asserting either. A silent skip is how a feature disappears for a whole
+        # release; a hard failure would hold H1/H2/H4 hostage to it.
+        H3_FILES=""
+        for f in res_send.cpp DnsProxyListener.cpp DnsResolver.cpp resolv.cpp; do
+            [ -f "$WORK/DnsResolver/$f" ] || continue
+            grep -q 'nr::resNSend(' "$WORK/DnsResolver/$f" 2>/dev/null || continue
+            H3_FILES="$H3_FILES $f"
+        done
+        if [ -n "$H3_FILES" ]; then
+            ok "H3 applied to$H3_FILES"
+        else
+            skip "H3 not applied — $(grep -o 'H3 SKIPPED.*' "$WORK/p.log" | head -1)"
+        fi
+
+        for f in getaddrinfo.cpp gethnamaddr.cpp $H3_FILES; do
             o=$(tr -cd '{' < "$WORK/DnsResolver/$f" | wc -c)
             c=$(tr -cd '}' < "$WORK/DnsResolver/$f" | wc -c)
             [ "$o" = "$c" ] && ok "$f braces balanced" || bad "$f braces UNBALANCED ($o/$c)"
@@ -145,7 +201,7 @@ if [ -d "$DNS_SRC" ]; then
         # over AOSP's symlinked .clang-format / rustfmt.toml, which `cp -r` does
         # not reproduce — that is an artifact of this harness, not of revert.
         rev_clean=1
-        for f in Android.bp getaddrinfo.cpp gethnamaddr.cpp; do
+        for f in Android.bp getaddrinfo.cpp gethnamaddr.cpp $H3_FILES; do
             diff -q "$DNS_SRC/$f" "$WORK/DnsResolver/$f" > /dev/null 2>&1 || {
                 bad "revert left $f modified"
                 diff -u "$DNS_SRC/$f" "$WORK/DnsResolver/$f" | head -20 | sed 's/^/        /'

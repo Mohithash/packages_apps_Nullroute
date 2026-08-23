@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Phase 2 compile/update pipeline strings.
+
+    A separate values file from strings.xml on purpose: Android merges every
+    values/*.xml, and keeping the pipeline's copy in its own file means the
+    feature can be reviewed, translated and reverted without touching the four
+    Phase 1 screens.
+
+    THE COPY HERE IS LOAD-BEARING. Two of these categories work backwards from
+    every other switch in Android — turning "Anti-fraud fingerprinting" ON makes
+    Nullroute block MORE, which is what breaks banking apps — so each carve-out
+    says what ON does in the summary rather than relying on the title.
+-->
+<resources>
+
+    <!-- False-positive risk chips -->
+    <string name="risk_low">Low risk</string>
+    <string name="risk_low_detail">Rarely breaks anything.</string>
+
+    <string name="risk_medium">Some risk</string>
+    <string name="risk_medium_detail">Occasionally blocks something you wanted. Easy to allow again from the Log screen.</string>
+
+    <string name="risk_high">High risk</string>
+    <string name="risk_high_detail">Expect to allow domains by hand.</string>
+
+    <string name="risk_own_vpn">Breaks your own VPN</string>
+    <string name="risk_own_vpn_detail">This list blocks the endpoints VPN, proxy and private-DNS apps connect to — including the ones you chose. Turn it on only if you do not use any of them.</string>
+
+    <string name="risk_banking">Breaks banking apps</string>
+    <string name="risk_banking_detail">Banks, brokerages and card issuers use device fingerprinting to approve a login. Blocking it usually shows as an app that spins forever or logs you straight back out, with nothing to connect it to an ad blocker.</string>
+
+    <string name="risk_delivery">Breaks delivery and ride-hailing</string>
+    <string name="risk_delivery_detail">Deferred deep links are how a shared link opens the right screen. Blocking them shows as a blank screen or an onboarding loop.</string>
+
+    <!-- What the switch means, shown under the title -->
+    <string name="category_on_blocks">On: adds this list to the blocklist.</string>
+    <string name="category_on_stops_allowing">On: stops protecting these domains, and lets your blocklists block them.</string>
+
+    <!-- Block add-ons -->
+    <string name="category_oem">Manufacturer telemetry</string>
+    <string name="category_oem_summary">Analytics endpoints your phone\'s own system apps report to. Chosen automatically from this device\'s brand.</string>
+
+    <string name="category_malware">Malware and phishing</string>
+    <string name="category_malware_summary">Around 369,000 hosts known for malware, phishing and scams. Large, and updated aggressively, so a legitimate site occasionally lands on it.</string>
+
+    <string name="category_popup">Pop-up ads</string>
+    <string name="category_popup_summary">Around 54,000 hosts behind pop-ups, pop-unders and forced redirects.</string>
+
+    <string name="category_nsfw">Adult content</string>
+    <string name="category_nsfw_summary">Around 114,000 adult sites. This is a content filter, not an ad filter.</string>
+
+    <string name="category_gambling">Gambling</string>
+    <string name="category_gambling_summary">Around 108,000 betting and casino sites.</string>
+
+    <string name="category_shortener">URL shorteners</string>
+    <string name="category_shortener_summary">Link shorteners are used for tracking, and also for perfectly ordinary links. Expect the occasional dead link.</string>
+
+    <string name="category_tiktok">TikTok telemetry</string>
+    <string name="category_tiktok_summary">TikTok\'s analytics endpoints. The app itself keeps working; some in-app links may not.</string>
+
+    <string name="category_winoffice">Windows and Office telemetry</string>
+    <string name="category_winoffice_summary">Useful if this device syncs with a Microsoft account or runs Office apps.</string>
+
+    <string name="category_doh">DNS, VPN and proxy bypass</string>
+    <string name="category_doh_summary">Blocks the endpoints apps use to route DNS around this filter. It cannot tell yours from theirs.</string>
+
+    <!-- Allow carve-outs. These read backwards from every other switch. -->
+    <string name="category_antifraud">Anti-fraud fingerprinting</string>
+    <string name="category_antifraud_summary">Nullroute normally protects these domains so your bank can verify the device. They are trackers, and other blocklists block them.</string>
+
+    <string name="category_attribution">Attribution and deep links</string>
+    <string name="category_attribution_summary">Nullroute normally protects these so shared links open the right screen in delivery and ride-hailing apps. They are trackers, and other blocklists block them.</string>
+
+    <!-- Update pipeline -->
+    <string name="pipeline_step_probing">Checking which lists changed…</string>
+    <string name="pipeline_step_hotfix">Fetching compatibility fixes…</string>
+    <string name="pipeline_source_unchanged">unchanged</string>
+    <string name="pipeline_source_cached">using the cached copy</string>
+
+</resources>

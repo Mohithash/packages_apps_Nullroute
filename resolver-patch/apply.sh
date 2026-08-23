@@ -20,18 +20,25 @@
 #      the tree is only touched once every hunk is known good. A half-applied
 #      patch is the failure mode this project can least afford, because it
 #      compiles.
+#
+# H3 is the one hunk that is allowed to be absent. `android.net.DnsResolver`'s
+# raw-query path did not always exist and a fork is free not to carry it, so H3
+# is located independently and REPORTED AS SKIPPED rather than failing the run —
+# H1, H2 and H4 cover ~99% of traffic and must never be held hostage to it.
 set -euo pipefail
 
 BEGIN_MARK='// NULLROUTE-BEGIN'
 END_MARK='// NULLROUTE-END'
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SRC_FILES="NrFilter.h NrFilter.cpp nr_hook.h NrRingWriter.cpp"
+SRC_FILES="NrFilter.h NrFilter.cpp nr_hook.h NrRingWriter.cpp NrResSend.cpp nr_wire.h"
 
 MODE=apply
 case "${1:-}" in
     --check)   MODE=check;  shift ;;
     --revert)  MODE=revert; shift ;;
-    --help|-h) sed -n '2,24p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    # Prints the header block above, up to (not including) the `set -euo` line,
+    # so extending that comment never silently truncates --help.
+    --help|-h) sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | sed '$d'; exit 0 ;;
 esac
 
 DNS="${1:-${ANDROID_BUILD_TOP:-}/packages/modules/DnsResolver}"
@@ -60,7 +67,16 @@ done
 # ---------------------------------------------------------------------------
 if [ "$MODE" = revert ]; then
     step "Reverting"
-    for f in "$GAI" "$GHN" "$BP"; do
+    # Every file H3 could have landed in, whether or not it did. Files without a
+    # marker are left ALONE rather than rewritten: an awk round-trip through a
+    # file we never touched is a needless chance to lose a missing trailing
+    # newline, and `--revert` has to be byte-exact for the verification gate to
+    # be able to prove it.
+    for f in "$GAI" "$GHN" "$BP" \
+             "$DNS/res_send.cpp" "$DNS/DnsProxyListener.cpp" "$DNS/DnsResolver.cpp" \
+             "$DNS/resolv.cpp"; do
+        [ -f "$f" ] || continue
+        grep -q 'NULLROUTE-BEGIN' "$f" || continue
         awk -v b="$BEGIN_MARK" -v e="$END_MARK" '
             index($0, b) { skip = 1 }
             !skip        { print }
@@ -109,6 +125,17 @@ find_definition() {   # <file> <return-type regex> <function name>
     ' "$1"
 }
 
+# The single body-carrying definition, or nothing. Non-fatal — used where a
+# missing definition is a legitimate outcome (H3).
+try_body_definition() {   # <file> <return-type regex> <function name>
+    local file="$1" rt="$2" fn="$3" bodies n
+    [ -f "$file" ] || return 1
+    bodies="$(find_definition "$file" "$rt" "$fn" 2>/dev/null | awk -F: '$3 == "body"' || true)"
+    n="$(printf '%s\n' "$bodies" | grep -c . || true)"
+    [ "$n" -eq 1 ] || return 1
+    printf '%s\n' "$bodies"
+}
+
 pick_body_definition() {   # <file> <return-type regex> <function name>
     local file="$1" rt="$2" fn="$3" all bodies n
     all="$(find_definition "$file" "$rt" "$fn" || true)"
@@ -123,13 +150,21 @@ pick_body_definition() {   # <file> <return-type regex> <function name>
     printf '%s\n' "$bodies"
 }
 
-# Assert that every identifier a hunk references really exists in the signature
-# being patched. This is what keeps the hook signature-AGNOSTIC without letting
-# it become signature-BLIND.
+# Does the signature really name every identifier a hunk is about to reference?
+# This is what keeps the hooks signature-AGNOSTIC without letting them become
+# signature-BLIND.
+has_params() {   # <signature text> <ident...>
+    local sig="$1" p; shift
+    for p in "$@"; do
+        printf '%s' "$sig" | grep -Eq "[^A-Za-z0-9_]${p}[^A-Za-z0-9_]" || return 1
+    done
+    return 0
+}
+
 require_params() {   # <signature text> <what> <ident...>
     local sig="$1" what="$2" p; shift 2
     for p in "$@"; do
-        printf '%s' "$sig" | grep -Eq "[^A-Za-z0-9_]${p}[^A-Za-z0-9_]" || die \
+        has_params "$sig" "$p" || die \
 "$what: parameter '$p' is not in this tree's signature. Patch by hand and update apply.sh.
         signature seen: $sig"
     done
@@ -268,12 +303,97 @@ info "H2 resolv_gethostbyname() body opens at line $H2_BRACE"
 grep -qE '^[a-z_ ]*int[[:space:]]+getaddrinfo_numeric[[:space:]]*\(' "$GAI" || die \
     "getaddrinfo_numeric() not found in getaddrinfo.cpp; the V_REDIRECT hunk has nothing to call"
 
+# ---------------------------------------------------------------------------
+# H3 — the raw-query path (Phase 3). OPTIONAL: skipped, never fatal.
+#
+# The hook goes on resolv_res_nsend(), which is the EXTERNAL entry point behind
+# DnsProxyListener's ResNSendCommand — i.e. android.net.DnsResolver.rawQuery().
+# It is deliberately NOT res_nsend(): that is the INTERNAL one every getaddrinfo
+# lookup also passes through, so hooking it would evaluate ~99% of the device's
+# traffic a second time, several frames after H1 already decided it.
+#
+# The alternative anchor — a hunk inside ResNSendHandler::run() — would have to
+# base64-decode the command argument itself and then reimplement the dnsproxyd
+# reply framing to short-circuit it. resolv_res_nsend()'s contract is already
+# exactly right: bytes in, bytes out, an rcode out-parameter, and a return value
+# that is a length.
+# ---------------------------------------------------------------------------
+H3_ON=0
+H3_FILE=""
+H3_BRACE=0
+H3_SKIP=""
+H3_CTX=""
+H3_MSG_PTR=""; H3_MSG_LEN=""; H3_ANS_PTR=""; H3_ANS_LEN=""
+
+h3_locate() {
+    local dpl="$DNS/DnsProxyListener.cpp" f def sig
+
+    # The evidence that this tree has a raw-query path at all. Without it,
+    # resolv_res_nsend() would have no caller and the hunk would be dead code.
+    if [ ! -f "$dpl" ] || ! grep -q 'ResNSendCommand' "$dpl"; then
+        H3_SKIP="no ResNSendCommand in this tree — there is no raw-query path to hook"
+        return 1
+    fi
+
+    for f in res_send.cpp DnsProxyListener.cpp DnsResolver.cpp resolv.cpp; do
+        def="$(try_body_definition "$DNS/$f" 'int' 'resolv_res_nsend' || true)"
+        [ -n "$def" ] || continue
+        H3_FILE="$DNS/$f"
+        H3_BRACE="$(printf '%s' "$def" | cut -d: -f2)"
+        sig="$(printf '%s' "$def" | cut -d: -f4-)"
+        break
+    done
+    if [ -z "$H3_FILE" ] || [ "$H3_BRACE" = "0" ]; then
+        H3_SKIP="no single body-carrying definition of resolv_res_nsend() found"
+        return 1
+    fi
+
+    # Both spellings are in the wild.
+    if   has_params "$sig" netContext; then H3_CTX=netContext
+    elif has_params "$sig" netcontext; then H3_CTX=netcontext
+    else
+        H3_SKIP="resolv_res_nsend() has no netContext/netcontext parameter, so there is no uid to attribute the query to"
+        return 1
+    fi
+
+    # Two parameter shapes: std::span (current) and the older pointer+length
+    # pair. Anything else is a shape we have not seen and must not guess at.
+    if has_params "$sig" msg ans rcode && printf '%s' "$sig" | grep -q 'span'; then
+        H3_MSG_PTR='msg.data()'; H3_MSG_LEN='msg.size()'
+        H3_ANS_PTR='ans.data()'; H3_ANS_LEN='ans.size()'
+    elif has_params "$sig" msg msgLen ans ansLen rcode; then
+        H3_MSG_PTR='msg';       H3_MSG_LEN='(size_t)msgLen'
+        H3_ANS_PTR='ans';       H3_ANS_LEN='(size_t)ansLen'
+    else
+        H3_SKIP="unrecognised resolv_res_nsend() signature: $sig"
+        return 1
+    fi
+    return 0
+}
+
+if h3_locate; then
+    H3_ON=1
+    info "H3 resolv_res_nsend() body opens at line $H3_BRACE in $(basename "$H3_FILE")"
+else
+    warn "H3 SKIPPED — $H3_SKIP.
+             H1/H2/H4 are unaffected and still cover every getaddrinfo(),
+             gethostbyname() and DnsResolver.query() caller. What is lost is
+             android.net.DnsResolver.rawQuery(), which no longer sees a verdict."
+fi
+
 if [ "$MODE" = check ]; then
-    if already "$GAI" && already "$GHN" && already "$BP" && [ -f "$DNS/nullroute/NrFilter.cpp" ]; then
-        echo; echo "OK — patch is applied."
+    h3_applied=1
+    if [ "$H3_ON" = 1 ]; then
+        already "$H3_FILE" && [ -f "$DNS/nullroute/NrResSend.cpp" ] || h3_applied=0
+    fi
+    if already "$GAI" && already "$GHN" && already "$BP" \
+       && [ -f "$DNS/nullroute/NrFilter.cpp" ] && [ "$h3_applied" = 1 ]; then
+        echo
+        if [ "$H3_ON" = 1 ]; then echo "OK — patch is applied (H1 H2 H3 H4)."
+        else                      echo "OK — patch is applied (H1 H2 H4; H3 skipped)."; fi
         exit 0
     fi
-    echo; echo "NOT APPLIED (all hook sites located successfully; run without --check to apply)."
+    echo; echo "NOT APPLIED (all applicable hook sites located successfully; run without --check to apply)."
     exit 1
 fi
 
@@ -285,15 +405,26 @@ trap 'rm -rf "$WORK"' EXIT
 cp "$GAI" "$WORK/getaddrinfo.cpp"
 cp "$GHN" "$WORK/gethnamaddr.cpp"
 cp "$BP"  "$WORK/Android.bp"
+H3_STAGED=""
+if [ "$H3_ON" = 1 ]; then
+    H3_STAGED="$WORK/$(basename "$H3_FILE")"
+    cp "$H3_FILE" "$H3_STAGED"
+fi
 
 step "Staging edits"
 
 # --- Android.bp ------------------------------------------------------------
+#
+# NrResSend.cpp goes into srcs unconditionally, even where H3 was skipped. It
+# compiles standalone — it references nothing but nr_hook.h, nr_wire.h and libc —
+# so the build shape stays identical across trees, which is what keeps --check
+# and the idempotency guarantee simple. Without its hunk it is simply never
+# called.
 if already "$WORK/Android.bp"; then
     info "Android.bp already patched"
 else
     bp_add_array "$WORK/Android.bp" libnetd_resolv srcs \
-        '"nullroute/NrFilter.cpp", "nullroute/NrRingWriter.cpp",'
+        '"nullroute/NrFilter.cpp", "nullroute/NrRingWriter.cpp", "nullroute/NrResSend.cpp",'
     # libnrformat_headers is the SINGLE source of truth for the on-disk format.
     # There is deliberately no copied header in this tree: two byte-identical
     # copies drift the first time one repo is rebased and the other is not, and
@@ -416,6 +547,47 @@ EOF
     info "gethnamaddr.cpp: H2 + include"
 fi
 
+# --- H3 --------------------------------------------------------------------
+if [ "$H3_ON" = 1 ]; then
+    if already "$H3_STAGED"; then
+        info "$(basename "$H3_FILE") already patched"
+    else
+        cat > "$WORK/h3.txt" <<EOF
+$BEGIN_MARK
+#ifdef NULLROUTE_ENABLED
+    // H3. This is the EXTERNAL entry point: its only caller is DnsProxyListener's
+    // ResNSendCommand handler, i.e. android.net.DnsResolver.rawQuery(). The
+    // res_nsend() below is the INTERNAL one that res_nsearch()/res_nquery() — and
+    // therefore every getaddrinfo() lookup — also reaches, so hooking that instead
+    // would re-evaluate ~99% of the device's traffic several frames after H1 has
+    // already decided it, double-count every block, and reach a second verdict on
+    // a question H1 had acted on.
+    //
+    // Guarded for the same reason as H1 and H2: this hunk runs before the
+    // function's own argument validation, and a null deref inside netd restarts
+    // zygote.
+    if ($H3_CTX != nullptr && rcode != nullptr) {
+        // A positive return is a complete synthesized wire answer already in the
+        // caller's buffer, with *rcode set to match — exactly the contract of the
+        // real call below. Zero means "not ours", and zero is also what every
+        // internal failure returns, so no raw query can fail because of Nullroute.
+        //
+        // \`event\` is deliberately left untouched: an intercepted query never
+        // reached a transport, and filling in server statistics for a lookup that
+        // did not happen would put fiction into the metrics. H1 does the same.
+        const int nr_len = nr::resNSend($H3_MSG_PTR, $H3_MSG_LEN, ${H3_CTX}->uid,
+                                        $H3_ANS_PTR, $H3_ANS_LEN, rcode);
+        if (nr_len > 0) return nr_len;
+    }
+#endif
+$END_MARK
+EOF
+        insert_after_file "$H3_STAGED" "$H3_BRACE" "$WORK/h3.txt"
+        insert_include "$H3_STAGED" '#include "nullroute/nr_wire.h"'
+        info "$(basename "$H3_FILE"): H3 + include"
+    fi
+fi
+
 # ---------------------------------------------------------------------------
 # Verify the staged result before a single byte of the tree changes
 # ---------------------------------------------------------------------------
@@ -424,6 +596,7 @@ check_staged() {   # <file> <needle> <description>
     grep -q "$2" "$1" || die "staged $(basename "$1") is missing $3 — the tree was NOT modified"
 }
 check_staged "$WORK/Android.bp"      'nullroute/NrFilter.cpp'    'the srcs entry'
+check_staged "$WORK/Android.bp"      'nullroute/NrResSend.cpp'   'the H3 srcs entry'
 check_staged "$WORK/Android.bp"      'libnrformat_headers'       'header_libs'
 check_staged "$WORK/Android.bp"      'libnrfilter'               'whole_static_libs'
 check_staged "$WORK/Android.bp"      'NULLROUTE_ENABLED'         'the cflags define'
@@ -434,7 +607,13 @@ check_staged "$WORK/gethnamaddr.cpp" 'nr::hook(name'             'the H2 hunk'
 check_staged "$WORK/gethnamaddr.cpp" 'nullroute/nr_hook.h'       'the include'
 
 # Exactly one hook per site, no matter how many times this has been run.
-for pair in 'getaddrinfo.cpp:nr::hook(hostname' 'gethnamaddr.cpp:nr::hook(name'; do
+IDEMPOTENCY='getaddrinfo.cpp:nr::hook(hostname gethnamaddr.cpp:nr::hook(name'
+if [ "$H3_ON" = 1 ]; then
+    check_staged "$H3_STAGED" 'nr::resNSend('        'the H3 hunk'
+    check_staged "$H3_STAGED" 'nullroute/nr_wire.h'  'the H3 include'
+    IDEMPOTENCY="$IDEMPOTENCY $(basename "$H3_FILE"):nr::resNSend("
+fi
+for pair in $IDEMPOTENCY; do
     f="${pair%%:*}"; n="${pair#*:}"
     c="$(grep -c "$n" "$WORK/$f" || true)"
     [ "$c" -eq 1 ] || die "staged $f has $c copies of the hook — idempotency is broken, the tree was NOT modified"
@@ -454,6 +633,11 @@ done
 cp "$WORK/Android.bp"      "$BP"
 cp "$WORK/getaddrinfo.cpp" "$GAI"
 cp "$WORK/gethnamaddr.cpp" "$GHN"
+if [ "$H3_ON" = 1 ]; then
+    # An `[ … ] && cp …` one-liner here would be a trap: under `set -e` the
+    # compound's non-zero result when H3 is off exits the script mid-install.
+    cp "$H3_STAGED" "$H3_FILE"
+fi
 info "tree updated"
 
 # ---------------------------------------------------------------------------
@@ -470,9 +654,13 @@ if [ -f "$APP_BP" ]; then
     fi
 fi
 
+echo
+if [ "$H3_ON" = 1 ]; then
+    echo "OK — patch applied (H1 H2 H3 H4)."
+else
+    echo "OK — patch applied (H1 H2 H4). H3 SKIPPED: $H3_SKIP"
+fi
 cat <<'DONE'
-
-OK — patch applied.
 
 Next:
     mka libnrformat_headers libnrfilter

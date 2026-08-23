@@ -25,17 +25,35 @@ import java.nio.file.Files
  * acceptable is shipping netd an index it will choke on, because netd's init
  * stanza carries `onrestart restart zygote` — a matcher fault there is a UI
  * loop, not a network outage.
+ *
+ * ## The degradation ladder, and where this file sits on it
+ *
+ * ```
+ *   current.nrdx  ->  previous.nrdx  ->  baseline (recompiled by the seeder)
+ *                 ->  L0 hosts only  ->  PASS-ALL
+ * ```
+ *
+ * [promote] moves down a rung only by refusing to move up; [rollback] is the one
+ * step this file takes on purpose, and it is announced, never silent.
  */
 object Generation {
 
     private const val TAG = "Nullroute"
 
     /**
-     * A source that lost this much of its content is a truncated download, not
-     * an update. Below the floor we refuse rather than quietly shrink the user's
-     * protection by 90%.
+     * A build that lost this much of the previous index's content is a truncated
+     * download, not an update. Below the floor we refuse rather than quietly
+     * shrinking the user's protection by 90%.
      */
     private const val SANITY_MIN_RATIO = 0.10
+
+    /**
+     * How many superseded generations of the side artefacts to keep. One, so that
+     * `previous.nrdx` always has its matching strings blob and manifest — a
+     * rollback that produces an index whose Rules screen cannot name a single
+     * source is a rollback that looks broken.
+     */
+    private const val KEEP_GENERATIONS = 2
 
     sealed class PromoteResult {
         object Ok : PromoteResult()
@@ -55,10 +73,21 @@ object Generation {
             is AbiTooNew ->
                 "index format v$indexAbi is newer than the installed resolver (v$resolverAbi)"
             is CanaryFailed ->
-                "safety check failed" + (failure?.let { ": ${it.host} (${it.why})" } ?: "")
+                "safety check failed" + (failure?.let { ": ${it.describe()}" } ?: "")
             is SanityFailed -> "only $newCount entries, previous build had $previousCount"
             is IoError -> "I/O error: $reason"
         }
+
+        /**
+         * Whether trying again later could plausibly succeed. An ABI mismatch
+         * cannot be retried away — it needs a resolver update — and retrying it
+         * every 30 minutes would burn wakeups forever.
+         */
+        val recoverable: Boolean
+            get() = when (this) {
+                is Ok, is AbiTooNew -> false
+                else -> true
+            }
     }
 
     /**
@@ -74,10 +103,19 @@ object Generation {
         val onDisk = Native.verify(Paths.currentIndex.absolutePath).let {
             if (it.ok) it.generation else 0L
         }
-        val gen = maxOf(persisted, onDisk) + 1
+        // The control page is the third authority, and the only one the resolver
+        // actually reads. A /data restore can leave preferences behind an index,
+        // or an index behind a control page; taking the max of all three is what
+        // makes the next number strictly greater than anything netd has mapped.
+        val published = if (ControlPage.isMapped) ControlPage.wantGeneration else 0L
+        val gen = maxOf(persisted, onDisk, published) + 1
         Settings.setLastGeneration(context, gen)
         return gen
     }
+
+    /** The generation netd is serving right now, or 0 if we cannot tell. */
+    fun mappedGeneration(): Long =
+        if (ControlPage.isMapped) ControlPage.telemetry().mappedGeneration else 0L
 
     /**
      * Promotes `staging.<gen>.nrdx` to `current.nrdx`.
@@ -103,6 +141,13 @@ object Generation {
         val info = Native.verify(staging.absolutePath)
         if (!info.ok) return PromoteResult.Corrupt(info.error ?: "unknown")
         if (!info.sha256Ok) return PromoteResult.Corrupt("sha256 mismatch")
+        if (info.generation != generation) {
+            // A staging file whose header disagrees with its name would be
+            // published under one number and remapped under another.
+            return PromoteResult.Corrupt(
+                "header says generation ${info.generation}, file says $generation"
+            )
+        }
         // The liveness-probe redirect has to be in the index or the Home screen
         // goes permanently blind — it would report "Limited" on a healthy device
         // and there would be no way for the user to tell the difference from a
@@ -200,16 +245,45 @@ object Generation {
         }
     }
 
+    /** True when there is something to roll back to, for the Diagnostics button. */
+    fun canRollback(): Boolean =
+        Paths.previousIndex.isFile && Native.verify(Paths.previousIndex.absolutePath).ok
+
     /**
-     * Removes staging blobs from builds that never made it. Keeps the failed
-     * artefact of the *current* generation, which Diagnostics may still want to
-     * verify, and never touches `quarantine.nrdx` — that one is evidence.
+     * The side artefacts for a generation: the UI strings blob and the manifest.
+     *
+     * They are written next to the index and promoted with it, but they are NOT
+     * part of the atomic swap: netd never reads either, so a torn or missing one
+     * costs a Rules screen that says "unavailable", never a wrong verdict.
+     */
+    fun sideArtefacts(generation: Long): List<File> =
+        listOf(Paths.stringsBlob(generation), Paths.manifestJson(generation))
+
+    /**
+     * Removes staging blobs from builds that never made it, and side artefacts
+     * older than the two generations still reachable.
+     *
+     * Keeps the failed artefact of the *current* generation, which Diagnostics
+     * may still want to verify, and never touches `quarantine.nrdx` — that one
+     * is evidence the boot-loop breaker left behind deliberately.
      */
     fun cleanupStaging(keepGeneration: Long) {
-        val keep = Paths.stagingIndex(keepGeneration).name
+        val keepStaging = Paths.stagingIndex(keepGeneration).name
+        val liveGenerations = setOf(
+            keepGeneration,
+            Native.verify(Paths.currentIndex.absolutePath).let { if (it.ok) it.generation else 0L },
+            Native.verify(Paths.previousIndex.absolutePath).let { if (it.ok) it.generation else 0L },
+        ).filter { it > 0 }.sortedDescending().take(KEEP_GENERATIONS).toSet()
+
         Paths.index.listFiles()?.forEach { f ->
-            if (f.name.startsWith("staging.") && f.name != keep) {
-                runCatching { f.delete() }
+            val name = f.name
+            when {
+                name.startsWith("staging.") && name != keepStaging -> runCatching { f.delete() }
+
+                name.startsWith("strings.") || name.startsWith("manifest.") -> {
+                    val gen = name.substringAfter('.').substringBefore('.').toLongOrNull()
+                    if (gen != null && gen !in liveGenerations) runCatching { f.delete() }
+                }
             }
         }
     }
