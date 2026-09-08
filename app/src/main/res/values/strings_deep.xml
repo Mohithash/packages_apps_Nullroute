@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Deep mode copy.
+
+    A separate values file from strings.xml on purpose: aapt2 merges every
+    <resources> in res/values, so a feature can own its strings without touching
+    another feature's file. Nothing here may duplicate a name from strings.xml.
+
+    THE VPN SLOT SENTENCE IS NOT NEGOTIABLE. Android allows exactly one
+    VpnService at a time. A user who turns Deep mode on and later cannot connect
+    their work VPN must have been told, in those words, before they turned it
+    on — not discovered it afterwards from a failure in someone else's app. It
+    appears in the consent copy, in the running notification, and in the summary.
+-->
+<resources>
+
+    <string name="deep_title">Deep mode</string>
+    <string name="deep_summary">Also filter Chrome, WebView and apps that run their own DNS. Uses your device\'s VPN slot.</string>
+
+    <!-- Notification channel -->
+    <string name="deep_channel">Deep mode</string>
+    <string name="deep_channel_desc">Shows that the Deep-mode DNS tunnel is running, and warns if it stops.</string>
+
+    <string name="deep_notification_title">Deep mode is on</string>
+    <string name="deep_notification_text">Filtering DNS for every app, including Chrome. This uses your device\'s VPN slot, so no other VPN can run at the same time.</string>
+    <string name="deep_notification_starting">Starting the DNS tunnel…</string>
+    <string name="deep_action_stop">Turn off</string>
+
+    <!--
+        Shown when the watchdog switched Deep mode off by itself. The number
+        matters: users need to know this was a rule, not a random failure.
+    -->
+    <string name="deep_disabled_title">Deep mode switched itself off</string>
+    <string name="deep_disabled_text">It failed three times in ten minutes, so it stopped to keep your connection working: %1$s. The rest of Nullroute is unaffected. You can turn Deep mode back on from the app.</string>
+
+    <!--
+        An abort BEFORE the tunnel existed — no VPN slot was taken and nothing
+        on the device is worse off, so this is informational and does not count
+        towards the automatic disable.
+    -->
+    <string name="deep_failed_title">Deep mode could not start</string>
+    <string name="deep_failed_text">%1$s. Nothing has changed on your device and Nullroute\'s other filtering is unaffected. Try again once the problem is resolved.</string>
+
+    <string name="deep_revoked_title">Deep mode stopped</string>
+    <string name="deep_revoked_text">Another app took the VPN slot. Only one VPN can run at a time, so Deep mode is off until you turn it on again. Nullroute\'s other filtering is unaffected.</string>
+
+    <!--
+        Consent copy. This is what the user reads BEFORE the system's own VPN
+        dialog, so it has to be the honest version rather than the persuasive
+        one.
+    -->
+    <string name="deep_consent_title">Turn on Deep mode?</string>
+    <string name="deep_consent_body">Deep mode routes only DNS lookups through Nullroute, using your device\'s VPN slot. While it is on, no other VPN app can run.\n\nIt adds filtering for Chrome, WebView and other apps that run their own DNS resolver — the ones the system filter cannot see.\n\nIt still cannot block: ads served from the same domain as the content (YouTube, Instagram, Spotify), apps that use their own encrypted DNS with built-in addresses, or anything at all while another VPN holds the slot.</string>
+    <string name="deep_consent_continue">Continue</string>
+
+    <!-- Status lines for the Deep-mode screen and Diagnostics. -->
+    <string name="deep_state_off">Off</string>
+    <string name="deep_state_starting">Starting…</string>
+    <string name="deep_state_on">On — the tunnel answered its own probe</string>
+    <string name="deep_state_unverified">On, but unverified — the tunnel has not answered its probe yet</string>
+
+    <string name="deep_default_on_reason">No resolver filter was found on this device, so Deep mode is on by default — it is the only layer that can filter here.</string>
+    <string name="deep_default_off_reason">The resolver filter is handling every app that uses Android\'s system resolver, so Deep mode is off by default. Turn it on to also cover Chrome and WebView.</string>
+
+    <!--
+        Private DNS in strict mode. We read the setting and never write it:
+        switching off the user's encrypted DNS to make our feature work would
+        be a privacy regression sold as a convenience (SPEC §1).
+    -->
+    <string name="deep_private_dns_strict">Private DNS is set to a specific provider, so system lookups go straight to it and Deep mode cannot see them. Nullroute will not change that setting for you — switch Private DNS to Automatic or Off if you want Deep mode to filter those lookups.</string>
+
+    <!-- Honest scope, shown next to the switch and not hidden in a FAQ. -->
+    <string name="deep_scope">Deep mode cannot block in-app encrypted DNS that uses built-in addresses, ads served from the same domain as the content, or anything while another VPN is connected.</string>
+
+</resources>
