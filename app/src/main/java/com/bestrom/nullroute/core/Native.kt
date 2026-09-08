@@ -352,6 +352,182 @@ object Native {
         if (it.ok) it.formatVersion else 0
     }
 
+
+    // ---- the strings sidecar (Phase 2 Rules screen) -------------------------
+    //
+    // `strings.<gen>.nrdx` is NOT the index. netd never maps it; it exists so the
+    // app can answer a question the index structurally cannot — the index stores
+    // 46-bit fingerprints, so it can say "blocked" but never "here are the twelve
+    // rules that say so". Both calls below therefore take the SIDECAR path, not
+    // Paths.currentIndex, and [stringsPathFor] is the only thing allowed to pair
+    // a generation with its blob.
+
+    /**
+     * What a pattern typed on the Rules screen would actually cover.
+     *
+     * [ok] false is a normal outcome, not a failure to hide: the sidecar for a
+     * generation is legitimately absent after a rollback that pruned it, or on a
+     * device that has never completed a build. The screen then says the count is
+     * unavailable and still accepts the rule — a rule the user cannot preview is
+     * still a rule they are entitled to add.
+     */
+    data class RulePreview(
+        val ok: Boolean,
+        val error: String?,
+        val base: String,
+        /** Rules in the whole corpus, for "12 of 226,398". */
+        val corpus: Int,
+        val apex: Int,
+        val subdomains: Int,
+        val blocks: Int,
+        val allows: Int,
+        /** Rules in the range, before the scan budget was applied. */
+        val range: Int,
+        /**
+         * The walk stopped at the budget, so [blocks] and [allows] are floors.
+         * Presented as "at least N" — an undercount shown as exact is the same
+         * class of lie as a status card that says "Protected" without measuring.
+         */
+        val truncated: Boolean,
+        // Public rather than private because a data class exposes every
+        // constructor property through componentN() and copy() anyway; hiding
+        // them would only be decorative. [matchedFor] is still the accessor to
+        // use — picking one of these by hand is how the apex/wildcard
+        // distinction gets lost again.
+        val matchSuffix: Int,
+        val matchWildcard: Int,
+        val matchExact: Int,
+    ) {
+        /**
+         * The count to show for a rule of this kind, keyed on
+         * `RuleStore.RuleKind.wire` — the same ABI value the native `RuleKind`
+         * enum uses.
+         *
+         * Three numbers rather than one because they are genuinely different: a
+         * `*.example.com` rule does not cover the apex, and showing it the total
+         * would claim credit for a rule the matcher will never apply.
+         */
+        fun matchedFor(kindWire: Int): Int = when (kindWire) {
+            0, 3 -> matchSuffix          // K_SUFFIX, K_FORCE
+            1 -> matchWildcard           // K_WILDCARD_ONLY
+            2 -> matchExact              // K_EXACT
+            else -> matchSuffix
+        }
+
+        companion object {
+            fun unavailable(reason: String, base: String = "") =
+                RulePreview(false, reason, base, 0, 0, 0, 0, 0, 0, false, 0, 0, 0)
+        }
+    }
+
+    /** One rule from the corpus, with the list that contributed it. */
+    data class RuleRow(
+        val rule: String,
+        /** True when this row IS the base name rather than something below it. */
+        val apex: Boolean,
+        val kindWire: Int,
+        val kindName: String,
+        val allow: Boolean,
+        val group: Int,
+        /** Empty when the manifest for this generation is gone; never guessed. */
+        val groupName: String,
+    )
+
+    data class RuleListing(
+        val ok: Boolean,
+        val error: String?,
+        val range: Int,
+        val truncated: Boolean,
+        val rules: List<RuleRow>,
+    ) {
+        companion object {
+            fun unavailable(reason: String) =
+                RuleListing(false, reason, 0, false, emptyList())
+        }
+    }
+
+    /**
+     * The sidecar that belongs to [generation]. Deliberately a path and not a
+     * lookup: pairing a strings blob with an index of a *different* generation
+     * would show counts from a corpus the device is not serving, which is worse
+     * than showing none.
+     */
+    fun stringsPathFor(generation: Long): String =
+        Paths.stringsBlob(generation).absolutePath
+
+    /**
+     * Counts, for the live preview under the rule input. Never throws — this runs
+     * from a text watcher on every keystroke, and an exception per keystroke for
+     * the ordinary "no sidecar yet" state would be noise.
+     */
+    fun stringsPreview(stringsPath: String, base: String): RulePreview {
+        if (!available) return RulePreview.unavailable("no-jni", base)
+        if (base.isBlank()) return RulePreview.unavailable("empty", base)
+        return try {
+            val json = JSONObject(nativeStringsPreview(stringsPath, base))
+            if (!json.optBoolean("ok", false)) {
+                return RulePreview.unavailable(text(json, "error") ?: "unavailable", base)
+            }
+            RulePreview(
+                ok = true,
+                error = null,
+                base = json.optString("base", base),
+                corpus = json.optInt("corpus"),
+                apex = json.optInt("apex"),
+                subdomains = json.optInt("subdomains"),
+                blocks = json.optInt("blocks"),
+                allows = json.optInt("allows"),
+                range = json.optInt("range"),
+                truncated = json.optBoolean("truncated", false),
+                matchSuffix = json.optInt("match_suffix"),
+                matchWildcard = json.optInt("match_wildcard"),
+                matchExact = json.optInt("match_exact"),
+            )
+        } catch (t: Throwable) {
+            RulePreview.unavailable(t.message ?: "preview failed", base)
+        }
+    }
+
+    /**
+     * The rules themselves, so a count can be checked instead of believed.
+     * Blocking on a mapping and a decode — background thread. Never throws.
+     */
+    fun stringsList(stringsPath: String, base: String, limit: Int): RuleListing {
+        if (!available) return RuleListing.unavailable("no-jni")
+        if (base.isBlank()) return RuleListing.unavailable("empty")
+        return try {
+            val json = JSONObject(nativeStringsList(stringsPath, base, limit))
+            if (!json.optBoolean("ok", false)) {
+                return RuleListing.unavailable(text(json, "error") ?: "unavailable")
+            }
+            val rows = ArrayList<RuleRow>()
+            val arr = json.optJSONArray("rules")
+            if (arr != null) {
+                for (i in 0 until arr.length()) {
+                    val r = arr.optJSONObject(i) ?: continue
+                    rows += RuleRow(
+                        rule = r.optString("rule"),
+                        apex = r.optBoolean("apex", false),
+                        kindWire = r.optInt("kind"),
+                        kindName = r.optString("kind_name"),
+                        allow = r.optBoolean("allow", false),
+                        group = r.optInt("group"),
+                        groupName = r.optString("group_name"),
+                    )
+                }
+            }
+            RuleListing(
+                ok = true,
+                error = null,
+                range = json.optInt("range"),
+                truncated = json.optBoolean("truncated", false),
+                rules = rows,
+            )
+        } catch (t: Throwable) {
+            RuleListing.unavailable(t.message ?: "listing failed")
+        }
+    }
+
     /**
      * "No error" reaches us in two shapes: `jstr_or_null()` writes JSON `null`
      * and `jstr()` writes `""`, and both appear in the emitters. Both have to
@@ -456,4 +632,16 @@ object Native {
     private external fun nativeQuery(indexPath: String, host: String): String
 
     private external fun nativeVerify(indexPath: String): String
+
+    // The Phase 2 pair. Same `object Native` receiver and the same
+    // Java_com_bestrom_nullroute_core_Native_native* symbols as everything above
+    // — jni_bridge.cpp exports them next to nativeQuery.
+
+    private external fun nativeStringsPreview(stringsPath: String, base: String): String
+
+    private external fun nativeStringsList(
+        stringsPath: String,
+        base: String,
+        limit: Int,
+    ): String
 }
