@@ -51,7 +51,7 @@ void nr_canonicalize(const char* name_in, size_t len, uint64_t seed, NrCanon* ou
      * caller's memory, and in the resolver that is the live request buffer. */
     char*  n = out->name;
     size_t L = 0;
-    bool   has_dot = false;
+    size_t first_dot = (size_t)-1;                  /* index in `n`, not in name_in */
     size_t label_len = 0;
 
     for (size_t i = 0; i < len; ++i) {
@@ -61,7 +61,7 @@ void nr_canonicalize(const char* name_in, size_t len, uint64_t seed, NrCanon* ou
         if (c == '.') {
             if (label_len > NR_MAX_LABEL) return;   /* malformed; PASS */
             label_len = 0;
-            has_dot = true;
+            if (first_dot == (size_t)-1) first_dot = L;
         } else {
             ++label_len;
         }
@@ -69,8 +69,17 @@ void nr_canonicalize(const char* name_in, size_t len, uint64_t seed, NrCanon* ou
     }
     if (label_len > NR_MAX_LABEL) return;
 
-    while (L > 0 && n[L - 1] == '.') --L;           /* strip trailing root dot */
-    if (L == 0 || !has_dot) return;                 /* "localhost", NetBIOS names */
+    while (L > 0 && n[L - 1] == '.') --L;           /* strip trailing root dot(s) */
+    /*
+     * Single label => PASS, and the test has to be made AFTER the strip. A
+     * trailing root dot is not a label separator: "localhost." and "com." are
+     * one label, and a plain "did we see any dot" flag says otherwise — which
+     * would make L1 authoritative for exactly the names NrFilter's H4 loopback
+     * guard documents it as never speaking for, and would let a depth-1 (TLD)
+     * rule swallow "localhost.". A surviving dot is a real separator precisely
+     * because n[L-1] is now known not to be one.
+     */
+    if (L == 0 || first_dot >= L) return;           /* "localhost", "com.", NetBIOS */
     n[L] = '\0';
     out->len = L;
 
@@ -88,10 +97,14 @@ void nr_canonicalize(const char* name_in, size_t len, uint64_t seed, NrCanon* ou
     uint64_t acc = seed ? seed : NR_FNV_OFFSET;
     uint8_t  D   = 0;
     for (size_t i = L; i-- > 0;) {
-        if (n[i] == '.') {
-            if (D >= NR_MAX_LABELS - 1) break;      /* HARD BOUND — fuzz-critical */
-            out->h[D++] = nr_mix(acc);
-        }
+        /* HARD BOUND — fuzz-critical. Past it we stop RECORDING but keep
+         * ABSORBING, so the final entry below is still the hash of the whole
+         * name. Breaking out instead left h[D-1] holding a 16-label SUFFIX while
+         * every caller reads it as the exact FQDN — nr_redir_get() most of all,
+         * which is exact-FQDN-only and would then answer a 20-label query with
+         * some other name's redirect address. The loop stays bounded by L, which
+         * is already capped at NR_MAX_NAME. */
+        if (n[i] == '.' && D < NR_MAX_LABELS - 1) out->h[D++] = nr_mix(acc);
         acc = (acc ^ (uint8_t)n[i]) * NR_FNV_PRIME;
     }
     out->h[D++] = nr_mix(acc);                      /* the whole name */

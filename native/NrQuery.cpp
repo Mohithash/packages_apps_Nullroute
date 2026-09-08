@@ -67,8 +67,15 @@ static Verdict evaluate_canon(const NrIndex& ix, const NrCanon& c) {
             const RuleKind k = (RuleKind)nr_slot_kind(s);
             if (!kind_applies(k, dep, D)) continue;
             if (k == K_FORCE) return v;          /* absolute: beats any block */
-            depth_allow = dep;
-            break;                                /* deepest allow wins */
+            /* Record the DEEPEST allow, but do NOT stop: rule 1 says K_FORCE
+             * beats everything at any depth, and a K_FORCE is by definition
+             * shallower than the allow we just found. Breaking here would let
+             * `block ads.a.b.c` + `allow a.b.c` + `!c` block a name the
+             * never-block floor says must always resolve — a captive portal or
+             * an OTA endpoint, i.e. the one case where failing closed is worst.
+             * The full walk is what the comment above already promised; the
+             * allow structures are ~72 KB and stay L2-resident. */
+            if (!depth_allow) depth_allow = dep;
         }
     }
     if (depth_allow == D) return v;               /* nothing can out-specify it */
@@ -109,15 +116,24 @@ Verdict nr_evaluate(const NrIndex& ix, const NrControl& ctl,
     Verdict v{};
     v.kind = V_PASS;
 
-    /* ---- gates: each is one predictable, well-tended branch --------------- */
-    if (ctl.mode != NR_MODE_ENFORCE) return v;
+    /* ---- gates: each is one predictable, well-tended branch ---------------
+     * `ctl` is a live MAP_SHARED view of control.bin, which ANOTHER PROCESS
+     * writes while this runs. A plain load of it is a data race: the compiler is
+     * entitled to reload it, to hoist it out of a branch, or to fold two reads
+     * into one. Every other reader of this page in the project already uses a
+     * relaxed atomic load; these two were the only plain ones. Relaxed is the
+     * right strength — nothing here is publishing or consuming other memory,
+     * we only need each byte to be read exactly once, from memory. */
+    if (__atomic_load_n(&ctl.mode, __ATOMIC_RELAXED) != NR_MODE_ENFORCE) return v;
     if (!ix.hdr) return v;
 
     /* Per-app policy. The uid is real here — netd reads it from SO_PEERCRED on
      * the dnsproxyd socket — which is what makes per-app rules correct at this
      * layer and merely approximate in any VpnService design. */
     const uint32_t app_id = (uint32_t)(uid % NR_AID_USER_OFFSET);
-    if (app_id < NR_UID_POLICY_LEN && ctl.uid_policy[app_id] == NR_POLICY_EXEMPT) return v;
+    if (app_id < NR_UID_POLICY_LEN &&
+        __atomic_load_n(&ctl.uid_policy[app_id], __ATOMIC_RELAXED) == NR_POLICY_EXEMPT)
+        return v;
 
     NrCanon c;
     nr_canonicalize(name_in, len, ix.hdr->hash_seed, &c);

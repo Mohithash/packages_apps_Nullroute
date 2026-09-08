@@ -138,6 +138,15 @@ static inline bool nr_index_validate(const uint8_t* base, size_t size, NrIndex* 
     }
     if (h->n_block && !nr_is_pow2(h->bt_cap)) return false;
     if (h->n_allow && !nr_is_pow2(h->at_cap)) return false;
+    /* rt_cap was the one capacity nobody checked, and nr_redir_get() masks with
+     * (rt_cap - 1) exactly as the tables do. Masking keeps the index inside the
+     * section either way, so this was never an out-of-bounds read — it was worse
+     * in a quieter way: with a non-power-of-two capacity the bucket function and
+     * the probe step both fold onto a subset of the table, so a redirect that is
+     * PRESENT is never found. The index validates, the filter reports ok:<gen>,
+     * and every redirect rule — including the idx-probe liveness redirect that
+     * is supposed to prove the hook is alive — silently stops working. */
+    if (h->rt_cap && !nr_is_pow2(h->rt_cap)) return false;
     if (h->sec[NR_SEC_BT].len < (uint64_t)h->bt_cap * sizeof(NrSlot)) return false;
     if (h->sec[NR_SEC_AT].len < (uint64_t)h->at_cap * sizeof(NrSlot)) return false;
     if (h->sec[NR_SEC_RT].len < (uint64_t)h->rt_cap * sizeof(NrRedir)) return false;
@@ -160,12 +169,17 @@ static inline bool nr_index_validate(const uint8_t* base, size_t size, NrIndex* 
 static inline bool nr_redir_get(const NrIndex& ix, uint64_t h, NrRedir* out) {
     if (!ix.redir_table || ix.hdr->rt_cap == 0) return false;
     const uint64_t want = nr_fp46(h);
-    size_t i = nr_bucket(h, ix.hdr->rt_cap);
-    for (uint32_t probe = 0; probe < ix.hdr->rt_cap; ++probe) {
+    const uint32_t cap  = ix.hdr->rt_cap;
+    size_t i = nr_bucket(h, cap);
+    /* Same hard work-bound as nr_table_get(), for the same reason: rt_cap is a
+     * 32-bit number out of the file and a fully-occupied redirect table would
+     * otherwise be a multi-million-slot scan per query. See NR_MAX_PROBE. */
+    const uint32_t lim = cap < NR_MAX_PROBE ? cap : NR_MAX_PROBE;
+    for (uint32_t probe = 0; probe < lim; ++probe) {
         const NrRedir* r = &ix.redir_table[i];
         if (r->fp == 0) return false;
         if (r->fp == want) { *out = *r; return true; }
-        i = (i + 1) & (size_t)(ix.hdr->rt_cap - 1);
+        i = (i + 1) & (size_t)(cap - 1);
     }
     return false;
 }

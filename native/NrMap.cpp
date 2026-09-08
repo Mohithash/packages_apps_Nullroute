@@ -79,7 +79,8 @@ const char* nr_index_fault_field(const uint8_t* base, size_t size) {
         if (s->len == 0) continue;
         if (s->off < NR_PAGE || s->off > size || s->len > size - s->off) return "section";
     }
-    if ((h->n_block && !nr_is_pow2(h->bt_cap)) || (h->n_allow && !nr_is_pow2(h->at_cap)))
+    if ((h->n_block && !nr_is_pow2(h->bt_cap)) || (h->n_allow && !nr_is_pow2(h->at_cap)) ||
+        (h->rt_cap && !nr_is_pow2(h->rt_cap)))
         return "cap";
     if (h->sec[NR_SEC_BT].len < (uint64_t)h->bt_cap * sizeof(NrSlot) ||
         h->sec[NR_SEC_AT].len < (uint64_t)h->at_cap * sizeof(NrSlot) ||
@@ -224,7 +225,13 @@ bool nr_map_shared_rw(const char* path, size_t min_bytes,
         ::close(fd);
         return false;
     }
-    const size_t len = (size_t)st.st_size;
+    /* Map exactly what we contracted for, not st_size. The app owns these two
+     * files, so st_size is a number it chooses; netd never reads past min_bytes
+     * (sizeof(NrControl), or the ring's header page plus its slots), and there is
+     * no reason for a process whose death restarts zygote to commit address space
+     * on another process's say-so. The short-file case is already rejected above,
+     * so min_bytes is always backed by real pages here. */
+    const size_t len = min_bytes;
     void* p = ::mmap(nullptr, len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     const int map_errno = errno;
     ::close(fd);

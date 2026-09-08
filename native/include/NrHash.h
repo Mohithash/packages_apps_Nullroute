@@ -71,6 +71,26 @@ static inline size_t nr_bucket(uint64_t h, uint32_t cap_pow2) {
 }
 
 /*
+ * Longest probe chain any lookup will walk.
+ *
+ * `probe < cap` is a termination bound, not a WORK bound, and inside netd those
+ * are not the same requirement. nr_index_validate() constrains the load factor
+ * from the header's CLAIMED entry count; it cannot constrain how many slots the
+ * file actually has set. A corrupt or hostile index may therefore declare
+ * n_block = 1, cap = 8388608 and fill every slot with non-zero garbage — and
+ * then a single miss walks 8 M slots (64 MB) at every one of up to 16 label
+ * depths, on every DNS query on the device. Nothing crashes; DNS simply stops,
+ * inside a process whose init stanza carries `onrestart restart zygote`.
+ *
+ * 256 is far past anything a real table produces: NrBuilder sizes every table to
+ * a load factor <= 0.5, where the longest chain over the measured 224 k-domain
+ * corpus is a couple of dozen slots. nrtest's corpus round-trip resolves every
+ * built rule, so a build that ever approached this bound would fail the suite
+ * rather than silently stop matching.
+ */
+#define NR_MAX_PROBE 256u
+
+/*
  * Open-addressed linear-probe lookup over a power-of-two table of NrSlot.
  *
  * Linear probing (not quadratic/robin-hood) because the table is built offline
@@ -84,11 +104,12 @@ static inline bool nr_table_get(const uint64_t* tbl, uint32_t cap, uint64_t h, u
     if (!tbl || cap == 0) return false;
     const uint64_t want = nr_fp46(h);
     size_t i = nr_bucket(h, cap);
-    /* Hard bound: never scan more than the table. A corrupt, fully-occupied table
-     * must terminate rather than spin — this loop runs inside netd, and netd's
-     * init stanza carries `onrestart restart zygote`, so a hang here is a UI loop,
-     * not merely a network outage. */
-    for (uint32_t probe = 0; probe < cap; ++probe) {
+    /* Hard bound: the shorter of the table and NR_MAX_PROBE. Giving up early
+     * costs at most a missed block on a table no legitimate build produces —
+     * i.e. it fails OPEN, which is the direction every other bound in this
+     * project also fails. */
+    const uint32_t lim = cap < NR_MAX_PROBE ? cap : NR_MAX_PROBE;
+    for (uint32_t probe = 0; probe < lim; ++probe) {
         uint64_t s = tbl[i];
         if (s == 0) return false;                 /* empty slot terminates the chain */
         if (nr_slot_fp(s) == want) { *out = s; return true; }
