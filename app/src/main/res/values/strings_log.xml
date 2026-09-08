@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Phase 3 strings: the query log, retention, and the two notifiers.
+
+    Kept in their own values file so this feature can be written, reviewed and
+    reverted without touching values/strings.xml. Android merges every file under
+    res/values, so the R class is the same either way.
+-->
+<resources>
+
+    <!-- Breakage notifier channel -->
+    <string name="channel_breakage">App breakage</string>
+    <string name="channel_breakage_desc">Tells you when blocking looks like it is breaking the app you are using, and offers to exempt it.</string>
+
+    <!--
+        "Nullroute blocked 6 requests from Bank." — the app label is a quantity
+        argument as well as the count, because several languages inflect the verb
+        with the count and cannot put the two in a fixed order.
+    -->
+    <plurals name="breakage_title">
+        <item quantity="one">Nullroute blocked %1$d request from %2$s</item>
+        <item quantity="other">Nullroute blocked %1$d requests from %2$s</item>
+    </plurals>
+    <string name="breakage_body">Tap to exempt this app.</string>
+    <string name="breakage_body_long">%1$s asked for several blocked domains in a few seconds, which usually means it is retrying and failing. Tap to exempt it from filtering — you can undo this at any time.</string>
+    <string name="breakage_action_exempt">Exempt this app</string>
+
+    <!--
+        Degraded states. "Limited" and "Not filtering" reuse the copy already in
+        values/strings.xml so the notification, the Home card and Diagnostics
+        cannot describe the same state in three different ways.
+    -->
+    <string name="degraded_no_l0_title">Built-in list missing</string>
+    <string name="degraded_no_l0_body">The resolver filter is working, so you are protected. The built-in fallback list that would keep blocking if the filter ever stopped is not present in this build — worth reporting, but nothing is broken right now.</string>
+    <string name="degraded_killed_body">The resolver filter is disabled by persist.sys.nullroute.kill. The built-in list is still blocking about 2,000 domains. Clear the property and reboot to restore full filtering.</string>
+
+    <!-- Query log -->
+    <string name="log_title">Query log</string>
+    <string name="log_empty">Nothing logged yet.</string>
+    <string name="log_off">Logging is off. Nothing is being recorded and nothing is stored.</string>
+    <!--
+        Said plainly, because the alternative is a user who believes the log is a
+        complete record of what their device asked for. It is not, and the exact
+        reasons are measured rather than assumed: the ring holds 4,096 records,
+        the resolver overwrites the oldest rather than blocking a lookup, and
+        before you unlock there is nowhere to store them.
+    -->
+    <string name="log_incomplete">%1$d records were overwritten before they could be stored. The log shows what was captured, not everything that happened.</string>
+    <string name="log_locked_note">Records are stored only while the device is unlocked. Lookups made before the first unlock after a reboot are not kept — that is deliberate, so a locked phone holds no browsing history.</string>
+
+    <string name="log_mode_off">Off</string>
+    <string name="log_mode_blocked">Blocked only</string>
+    <string name="log_mode_all">Everything</string>
+    <string name="log_mode_all_warning">Records every domain every app looks up, not just the blocked ones. This is a browsing history. Use it to work out why something is not being blocked, then turn it back down.</string>
+
+    <string name="log_retention_days">Keep for %1$d days</string>
+    <string name="log_retention_summary">%1$d records, oldest %2$s</string>
+    <string name="log_clear">Clear log</string>
+    <string name="log_cleared">Query log cleared.</string>
+
+    <!-- Log rows -->
+    <string name="log_row_blocked">Blocked</string>
+    <string name="log_row_redirected">Redirected</string>
+    <string name="log_row_allowed">Allowed</string>
+    <!-- The resolver keeps the TAIL of an over-long name, advanced to a label
+         boundary, because the matched rule is always a suffix. The ellipsis says
+         so rather than letting the user read a truncated name as the whole one. -->
+    <string name="log_row_truncated_prefix">…%1$s</string>
+    <string name="log_row_unknown_app">Unknown app (uid %1$d)</string>
+
+    <string name="log_action_allow">Allow this domain</string>
+    <string name="log_action_exempt">Exempt this app</string>
+    <!-- In-app DNS caches are not ours to flush: `neverallow … dnsresolver_service`
+         means we cannot even reach IDnsResolver.flushNetworkCache. Say so. -->
+    <string name="log_action_force_stop">Force stop app</string>
+    <string name="log_action_note">The app may need to be reopened before it notices the change.</string>
+
+</resources>
