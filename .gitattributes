@@ -1,0 +1,30 @@
+# Everything in this repo is consumed by a Linux AOSP build, and several files
+# are parsed by C that splits on '\n' and compares the rest byte-for-byte. A
+# CRLF checkout does not fail loudly anywhere — it fails as "the feature quietly
+# does nothing":
+#
+#   prebuilt/hosts        _gethtent() (getaddrinfo.cpp) NUL-terminates at the
+#                         '\n' and strcasecmp's the hostname token, so a
+#                         trailing '\r' kills all 2,000 entries at once and the
+#                         file still looks perfectly plausible.
+#   prebuilt/*.txt        nr_parse_line() trims bytes <= ' ', so these survive a
+#                         CRLF checkout — but they feed gen_l0_hosts.py's
+#                         exclusion sets, and a mismatch there re-opens the
+#                         never-block floor rather than reporting anything.
+#   rom/*.patch           `git apply` rejects a patch whose context lines gained
+#                         a '\r'; this one at least fails loudly.
+#   rom/sepolicy/*, *.rc  read by the build and by init.
+#
+# This repo is developed on Windows, where git's default core.autocrlf=true
+# rewrites the working tree on checkout. Pin it.
+* text=auto eol=lf
+
+# Generated artefacts that must never be touched by any filter.
+prebuilt/baseline.domains.xz  binary
+*.png                         binary
+*.jpg                         binary
+*.webp                        binary
+*.so                          binary
+*.jar                         binary
+*.keystore                    binary
+gradle/wrapper/gradle-wrapper.jar binary
