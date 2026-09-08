@@ -35,10 +35,33 @@
 # omission that nobody could see, and a reviewer scanning for the word `map`
 # should find it on every rule that backs an mmap.
 
-type nullroute_index_file, file_type, data_file_type, core_data_file_type;
-type nullroute_ctl_file,   file_type, data_file_type, core_data_file_type;
-type nullroute_log_file,   file_type, data_file_type, core_data_file_type;
-type nullroute_data_file,  file_type, data_file_type, core_data_file_type;
+# mlstrustedobject is on all four types, and it is not optional here.
+#
+# The app runs with levelFrom=all (rom/sepolicy/seapp_contexts.frag), so its
+# process level is s0:c<appid>,c<user> while these files are plain s0. The MLS
+# constraints in system/sepolicy/private/mls then deny every write, setattr,
+# rename, link and unlink the app makes under /data/misc/nullroute, because
+# l1 != l2 and none of the exemptions apply — and they do it through the
+# constraint, not through a missing allow rule, so the allow rules below all
+# look correct and the audit line points at a permission that is granted. It is
+# F1 again, arriving through a door the policy never looks at: mmap(PROT_WRITE)
+# on control.bin fails, pause and every per-app policy write are discarded, and
+# the index is never published. The mirror image is just as bad — a file the app
+# does manage to create carries the app's categories, netd runs at plain s0, and
+# netd's read is denied instead, which is a fail-open filter.
+#
+# ota_package_file (system/sepolicy/public/file.te:370) and wm_trace_data_file
+# carry the same attribute for the same reason: a /data file written by a
+# categorised app domain and read by an uncategorised system one.
+#
+# Do NOT reach for mlstrustedsubject on nullroute_app instead. The neverallow in
+# system/sepolicy/private/mlstrustedsubject.te forbids an mlstrustedsubject from
+# creating, renaming or unlinking privapp_data_file, which nullroute_app does,
+# so the policy would stop building.
+type nullroute_index_file, file_type, data_file_type, core_data_file_type, mlstrustedobject;
+type nullroute_ctl_file,   file_type, data_file_type, core_data_file_type, mlstrustedobject;
+type nullroute_log_file,   file_type, data_file_type, core_data_file_type, mlstrustedobject;
+type nullroute_data_file,  file_type, data_file_type, core_data_file_type, mlstrustedobject;
 
 ###############################################################################
 # Properties

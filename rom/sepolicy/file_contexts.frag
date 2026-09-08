@@ -22,7 +22,7 @@
 # why rom/init.nullroute.rc runs restorecon_recursive /data/misc/nullroute right
 # after the mkdirs.
 
-/data/misc/nullroute/index(/.*)?   u:object_r:nullroute_index_file:s0
+/data/misc/nullroute/`index'(/.*)?   u:object_r:nullroute_index_file:s0
 /data/misc/nullroute/ctl(/.*)?     u:object_r:nullroute_ctl_file:s0
 /data/misc/nullroute/log(/.*)?     u:object_r:nullroute_log_file:s0
 /data/misc/nullroute/priv(/.*)?    u:object_r:nullroute_data_file:s0
