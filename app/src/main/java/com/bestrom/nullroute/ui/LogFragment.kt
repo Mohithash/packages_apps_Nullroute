@@ -297,7 +297,10 @@ class LogFragment : Fragment() {
     private data class Row(
         val title: String,
         val subtitle: String,
-        val badge: String,
+        // CharSequence, not String: relative() hands back what DateUtils
+        // produces and TextView consumes it directly, so narrowing here would only
+        // buy an allocation per row.
+        val badge: CharSequence,
         val uid: Int?,
         val domain: String?,
     )

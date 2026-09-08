@@ -6,7 +6,7 @@
 #
 # Runs everything that can be checked WITHOUT an Android build: compiles every
 # native translation unit, runs the semantic test suite against real corpora,
-# builds and briefly runs both fuzzers, and applies the resolver patch to a
+# builds and briefly runs all four fuzzers, and applies the resolver patch to a
 # throwaway copy of a real DnsResolver tree to prove the hunks still land.
 #
 # This is the merge gate. tools/ci_verify_image.sh is its counterpart and runs
@@ -161,6 +161,21 @@ if "$CXX" -fsanitize=fuzzer,address -std=c++17 -O1 -g "${INC[@]}" \
     fi
 else
     bad "nr_wire_fuzzer failed to build"; head -12 "$WORK/err.txt" | sed 's/^/        /'
+fi
+
+if "$CXX" -fsanitize=fuzzer,address -std=c++17 -O1 -g "${INC[@]}"     "$ROOT/native/fuzz/nr_cname_fuzzer.cpp" -o "$WORK/fz_cname" 2> "$WORK/err.txt"; then
+    # The same untrusted input as the wire fuzzer, one layer deeper: the ANSWER
+    # section rather than the question, walked as a chain of CNAMEs whose targets
+    # are themselves compressible names pointing back into the same buffer.
+    # Header-only and dependency-free for the same reason, so a crash here is a
+    # parser bug and nothing else.
+    if "$WORK/fz_cname" -runs=40000 -max_len=1200 > "$WORK/f4.log" 2>&1; then
+        ok "nr_cname_fuzzer: 40k runs clean"
+    else
+        bad "nr_cname_fuzzer crashed"; tail -20 "$WORK/f4.log" | sed 's/^/        /'
+    fi
+else
+    bad "nr_cname_fuzzer failed to build"; head -12 "$WORK/err.txt" | sed 's/^/        /'
 fi
 
 step "Resolver patch against a real DnsResolver tree"
