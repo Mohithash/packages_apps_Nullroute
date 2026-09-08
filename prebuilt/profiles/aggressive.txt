@@ -1,0 +1,69 @@
+# Nullroute profile — AGGRESSIVE
+# DESC: Everything. Five overlapping sources, ~443k domains. Expect to allow a domain now and then — keep the Log screen handy when an app misbehaves.
+#
+# Measured 2026-08-23 (SPEC §7.6): 592,006 domains in, 443,145 after suffix
+# collapse (-25.1%), ~9.1 MB resident in netd (1.06 MB filter + 8.0 MB table at
+# 2^20 + allow + redirect).
+#
+# Line format — see prebuilt/README.md:
+#   <url> # <Name>              block source
+#   @<url> # <Name>             allowlist seed (parsed as ALLOW regardless of the
+#                               list's own syntax)
+#   # OFF # <url> # <Name>      shipped but disabled by default
+# The user's overlay lives in profiles/aggressive_added.txt and
+# profiles/aggressive_removed.txt; this file is never rewritten by the app.
+#
+# ONLY THE STEVENBLACK LINE IS ALSO BAKED. HaGeZi and r-a-y are GPL-3.0 and
+# 1Hosts is MPL-2.0; all of them are fetched and compiled on-device on first
+# sync — see prebuilt/README.md and SPEC §10.5.
+#
+# The false-positive rate here is a real cost, not a theoretical one. Four of
+# these five sources overlap heavily (592,006 -> 443,145 after collapse), so the
+# marginal blocking they add over BALANCED is smaller than the domain count
+# suggests, while the marginal breakage is not.
+
+# HaGeZi Pro++ — wildcard/-onlydomains form, GPL-3.0, 248,692 domains.
+# The repo's hosts/ and domains/ directories no longer exist; any URL still
+# pointing at them 404s.
+https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.plus-onlydomains.txt # HaGeZi Pro++
+
+# StevenBlack unified — hosts format, MIT, 93,515 domains. Also baked offline.
+https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts # StevenBlack unified
+
+# 1Hosts Lite — wildcard format, MPL-2.0, 102,908 domains.
+# Fetch the wildcards.txt form, not Pro/domains.txt — that URL 404s.
+https://raw.githubusercontent.com/badmojr/1Hosts/master/Lite/wildcards.txt # 1Hosts Lite
+
+# r-a-y AdGuard DNS filter — hosts format, GPL-3.0, 177,029 domains.
+# The full AdGuard DNS filter, mirrored as plain hosts. Fetching AdGuard's own
+# filter_1.txt instead would need an AdGuard-syntax parser, not this one.
+https://raw.githubusercontent.com/r-a-y/mobile-hosts/master/AdguardDNS.txt # AdGuard DNS
+
+# The Blocklist Project, ads (no-localhost form) — domains, 234,025. Permissive:
+# the repo carries an Unlicense file and the generated list header now says MIT.
+# Either way it is bakeable; it is not baked for the reason below, not licensing.
+# Deliberately confined to AGGRESSIVE: it is broad, unreviewed relative to the
+# others, and it is the source most likely to be behind a false positive here.
+# It is NOT in BALANCED and must not be promoted into it (SPEC §7.6, correction 3).
+https://blocklistproject.github.io/Lists/alt-version/ads-nl.txt # Blocklist Project Ads
+
+# ---------------------------------------------------------------------------
+# Allowlist seeds — applied on every build, in every profile.
+#
+# These matter more here than anywhere else: at 443k domains the known-issues
+# and ad-shield allowlists are what keeps AGGRESSIVE usable rather than merely
+# impressive.
+#
+# ⚠️ hagezi's blocklist-referral and whitelist-referral are the SAME 1,604
+# domains with opposite intent. Ship exactly one — the whitelist.
+#
+# These two, and only these two, are also SourceCatalog.alwaysAllowSources in
+# the app; the two lists must stay identical.
+@https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/whitelist-referral-onlydomains.txt # HaGeZi referral allowlist
+@https://raw.githubusercontent.com/hagezi/dns-blocklists/main/share/ultimate-known-issues.txt # HaGeZi known-issues allowlist
+
+# share/ad-shield-subdomains.txt, share/apple-private-relay.txt and
+# share/microsoft.txt are NOT allow seeds — see the measurements recorded in
+# profiles/lite.txt. The ad-shield one matters most here: 86% of its 1,814
+# entries are blocked by Pro++, so allowing it would quietly undo a chunk of the
+# very profile the user picked for being aggressive.

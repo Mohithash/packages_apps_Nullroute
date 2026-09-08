@@ -1,0 +1,56 @@
+# Nullroute profile — BALANCED
+# DESC: The default. Full ad, tracker and telemetry blocking, with the ambiguous false-positive tail trimmed off. What most people should run.
+#
+# Measured 2026-08-23 (SPEC §7.6): 274,412 domains in, 226,398 after suffix
+# collapse (-17.5%), ~4.6 MB resident in netd (542 KB filter + 4.0 MB table at
+# 2^19 + allow + redirect). File-backed, clean, evictable, shared — zero heap.
+#
+# Line format — see prebuilt/README.md:
+#   <url> # <Name>              block source
+#   @<url> # <Name>             allowlist seed (parsed as ALLOW regardless of the
+#                               list's own syntax)
+#   # OFF # <url> # <Name>      shipped but disabled by default
+# The user's overlay lives in profiles/balanced_added.txt and
+# profiles/balanced_removed.txt; this file is never rewritten by the app.
+#
+# ONLY THE STEVENBLACK LINE IS ALSO BAKED (it is MIT, and it is the offline seed
+# in baseline.domains.xz). The HaGeZi and r-a-y lines are GPL-3.0 and are fetched
+# and compiled on-device on first sync — see prebuilt/README.md and SPEC §10.5.
+
+# HaGeZi Multi NORMAL — wildcard/-onlydomains form, GPL-3.0, 188,355 domains.
+# The wildcard/ form is 5.2x smaller than the mirrored hosts/ form (3.67 MB vs
+# 19.12 MB) AND preserves wildcard semantics. The repo's hosts/ and domains/
+# directories no longer exist; any URL still pointing at them 404s.
+https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/multi-onlydomains.txt # HaGeZi Multi NORMAL
+
+# StevenBlack unified — hosts format, MIT, 93,515 domains.
+# Also shipped offline as baseline.domains.xz, so this profile is already
+# ~93k domains deep before the device has ever seen a network.
+https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts # StevenBlack unified
+
+# r-a-y mobile-hosts — hosts format, GPL-3.0, 2,049 domains across the two.
+# Mobile ad SDK and spyware endpoints the desktop-derived lists miss.
+https://raw.githubusercontent.com/r-a-y/mobile-hosts/master/AdguardMobileAds.txt # AdGuard Mobile Ads
+https://raw.githubusercontent.com/r-a-y/mobile-hosts/master/AdguardMobileSpyware.txt # AdGuard Mobile Spyware
+
+# ---------------------------------------------------------------------------
+# Allowlist seeds — applied on every build, in every profile.
+#
+# These two, and only these two, are also SourceCatalog.alwaysAllowSources in
+# the app. The two lists must stay identical: the catalogue is what the fetch
+# path actually applies, and this file is what an OTA can change without an APK.
+#
+# ⚠️ hagezi's blocklist-referral and whitelist-referral are the SAME 1,604
+# domains with opposite intent. Ship exactly one. We ship the whitelist:
+# affiliate and referral link redirectors are load-bearing for shopping,
+# cashback and invite flows, and blocking them produces "the link does nothing"
+# reports that are impossible for a user to trace.
+@https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/whitelist-referral-onlydomains.txt # HaGeZi referral allowlist
+@https://raw.githubusercontent.com/hagezi/dns-blocklists/main/share/ultimate-known-issues.txt # HaGeZi known-issues allowlist
+
+# share/ad-shield-subdomains.txt, share/apple-private-relay.txt and
+# share/microsoft.txt are NOT allow seeds — see the measurements recorded in
+# profiles/lite.txt. In short: ad-shield is 86% blocklist and allowing it strips
+# ~1,500 live ad hosts back out; apple-private-relay would half-nullify the
+# doh-vpn-proxy-bypass add-on for an iOS-only feature; microsoft.txt is an
+# unblock *menu* and applying all of it force-allows MS telemetry everywhere.

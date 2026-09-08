@@ -1,0 +1,150 @@
+# Nullroute — the ALLOW_FORCE floor.
+#
+# Overlay stage 7(f) of the compile pipeline (SPEC §6.5): every line here is
+# applied as K_FORCE, which beats any block at any depth and cannot be removed
+# by a user rule, a profile switch, or an imported list. This is deliberate.
+# Everything in this file is something whose failure does NOT look like an ad
+# blocker misbehaving — it looks like a broken phone, and the user will never
+# connect the two. HaGeZi and 1Hosts Pro have both shipped a connectivity-check
+# block in the wild and the reports that came back were "no internet", not
+# "your blocklist is too aggressive".
+#
+# Syntax is §7.5: `!domain` == K_FORCE with SUFFIX semantics (apex AND every
+# subdomain). The `*.x` form from the risk tables is deliberately widened to the
+# apex here: for these operators the apex resolving is never the harm, and a
+# missed apex is a silent hole in the floor.
+#
+# BREADTH IS A REAL COST. `!googleapis.com` force-allows every name under
+# googleapis.com, ad-serving ones included. That trade is made knowingly — Play
+# Services multiplexes push, Play Integrity, Play Store, location, Maps, Wallet
+# and Auth over that suffix, and there is no way to force-allow the load-bearing
+# subset without enumerating an API surface Google changes without notice.
+# Do NOT add new broad suffixes here to fix one app; add the specific hostname.
+#
+# NOT in this file, on purpose:
+#   * The live captive-portal URLs. Settings.Global.CAPTIVE_PORTAL_HTTP_URL /
+#     CAPTIVE_PORTAL_HTTPS_URL are read at compile time (§6.5 step 7f) because a
+#     user or an RRO can change them; a static copy would go stale.
+#   * The device's Private DNS hostname. Also read live. Hardcoding the public
+#     DoH providers here would silently nullify the whole doh-vpn-proxy-bypass
+#     add-on, which exists precisely to block them.
+#   * The two .invalid liveness probes. They are REDIRECT entries; a force-allow
+#     would take precedence and destroy the only signal that proves the hook is
+#     live.
+
+# ---------------------------------------------------------------------------
+# Connectivity check / captive-portal detection
+#
+# NetworkStack probes these to decide whether the network has internet at all.
+# A blocked probe does not degrade gracefully: the device concludes it is behind
+# a portal forever — permanent "sign in to network" notification, the "no
+# internet" exclamation on the Wi-Fi icon, and apps that consult
+# NetworkCapabilities.NET_CAPABILITY_VALIDATED simply refuse to work.
+!connectivitycheck.gstatic.com
+!connectivitycheck.android.com
+!clients3.google.com
+!clients4.google.com
+!www.google.com
+
+# ---------------------------------------------------------------------------
+# Push (FCM/GCM)
+#
+# THE most damaging possible entry on a blocklist. Play Services holds one
+# long-lived socket to mtalk for every push message on the device; block it and
+# messaging, email, 2FA prompts, banking alerts and ride-hailing all silently
+# stop arriving, with no error anywhere the user can see. The alt1..alt8 hosts
+# are the failover pool — blocking mtalk.google.com alone just moves the socket.
+!mtalk.google.com
+!mtalk4.google.com
+!alt1-mtalk.google.com
+!alt2-mtalk.google.com
+!alt3-mtalk.google.com
+!alt4-mtalk.google.com
+!alt5-mtalk.google.com
+!alt6-mtalk.google.com
+!alt7-mtalk.google.com
+!alt8-mtalk.google.com
+!android.apis.google.com
+
+# ---------------------------------------------------------------------------
+# Google core platform
+#
+# googleapis.com carries FCM registration, Play Integrity, SafetyNet, Auth,
+# Location and the Play Store API. gstatic.com carries the connectivity check
+# above plus the certificate/CRLSet and WebView component payloads. gvt1/2/3 are
+# the Play Store's binary CDN — a blocked gvt1 host means app updates hang at
+# "Downloading…" with no error. android.clients.google.com is checkin: block it
+# and the device never completes registration, which breaks push permanently on
+# a fresh flash.
+!googleapis.com
+!gstatic.com
+!gvt1.com
+!gvt2.com
+!gvt3.com
+!android.clients.google.com
+
+# ---------------------------------------------------------------------------
+# OS update and OTA
+#
+# lineageos.org covers download.lineageos.org and mirrorbits.lineageos.org (the
+# Updater's mirror redirector). A device that cannot fetch its own security
+# patches because of an ad blocker is a security regression, not a feature.
+#
+# ⚠️ BestROM ships its own OTA endpoint via the Updater's server URL config.
+# Append that host here before the first BestROM release that carries Nullroute,
+# and re-run the canary — CanarySet.kt asserts the OEM update host resolves.
+!lineageos.org
+
+# ---------------------------------------------------------------------------
+# App stores and app distribution
+#
+# Play, F-Droid and Aurora. dl.google.com serves Play Store self-updates and
+# component downloads. Without these the user cannot install the fix for
+# whatever else broke.
+!play.google.com
+!play.googleapis.com
+!dl.google.com
+!f-droid.org
+!auroraoss.com
+
+# ---------------------------------------------------------------------------
+# Time synchronisation
+#
+# NTP is not optional infrastructure. A device with a wrong clock fails TLS
+# certificate validity checks on every connection, so the symptom of blocking
+# these is "the whole internet is broken with certificate errors" — one of the
+# hardest failures on this list to trace back to DNS.
+!time.android.com
+!time.google.com
+!pool.ntp.org
+!ntp.org
+
+# ---------------------------------------------------------------------------
+# Carrier IMS / VoWiFi / VoLTE provisioning
+#
+# 3GPP's operator namespace: ePDG discovery for VoWiFi, IMS APN bootstrapping
+# and carrier config all resolve under pub.3gppnetwork.org. Blocking it takes
+# out voice calling over Wi-Fi and, on some carriers, VoLTE — i.e. the phone
+# stops being a phone. This is Tier 2 for enforcement (IMS bypasses the system
+# resolver on many stacks) but the floor entry costs nothing and closes the case
+# where it does not.
+!pub.3gppnetwork.org
+!3gppnetwork.org
+
+# ---------------------------------------------------------------------------
+# PKI: certificate revocation and transparency
+#
+# OCSP and CRL endpoints. When revocation checking is soft-fail the symptom is
+# a multi-second stall on every new TLS connection; when an app hard-fails it is
+# an outright connection error. Kept to specific CA hostnames rather than broad
+# suffixes because these are not ad-adjacent operators and there is no reason to
+# widen them.
+!pki.goog
+!lencr.org
+!ocsp.digicert.com
+!crl3.digicert.com
+!crl4.digicert.com
+!ocsp.sectigo.com
+!crl.sectigo.com
+!ocsp.globalsign.com
+!crl.globalsign.com

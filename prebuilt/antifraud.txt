@@ -1,0 +1,82 @@
+# Nullroute — anti-fraud / device-fingerprinting carve-out.
+#
+# Overlay stage 7(e) of the compile pipeline (SPEC §6.5): by default every line
+# here is applied as an ALLOW, which strips these domains back OUT of whatever
+# HaGeZi, StevenBlack or 1Hosts put in. Only if the user opts the "Anti-fraud
+# fingerprinting" category IN does the overlay flip and the entries block.
+#
+# WHY THIS EXISTS. What actually breaks banking, brokerage and card-issuer apps
+# is not ad domains — it is the risk engine. These SDKs run before the login
+# screen appears, and their failure mode is not "an ad is missing", it is
+# "login failed, try again later", "device not recognised", an infinite loading
+# spinner, or an account lock after three retries. The user does not attribute
+# any of that to an ad blocker, so it arrives as "the ROM broke my bank".
+# See SPEC §10.3.
+#
+# These are genuinely privacy-hostile — full device fingerprinting, sensor and
+# behavioural telemetry — which is exactly why the category exists at all. It is
+# opt-in rather than absent: the user gets to make that trade, informed, with a
+# named FP-risk chip on the toggle.
+#
+# Syntax is a bare domain, i.e. K_SUFFIX: apex AND all subdomains. The risk
+# tables in §10.3 write these as `*.threatmetrix.com`; the apex is deliberately
+# folded in here because an allow overlay that misses the apex leaves a hole
+# that presents as an intermittent login failure.
+
+# ---------------------------------------------------------------------------
+# Device fingerprinting and transaction risk scoring
+#
+# Called synchronously during login or checkout. h.online-metrix.net (LexisNexis
+# ThreatMetrix) and iesnare.com (iovation, legacy profiling host) are the two
+# that show up most often in "my banking app stopped working" reports.
+online-metrix.net
+threatmetrix.com
+iovation.com
+iesnare.com
+sardine.ai
+incognia.com
+forter.com
+riskified.com
+signifyd.com
+sift.com
+siftscience.com
+kount.com
+ravelin.com
+castle.io
+seon.io
+socure.com
+accertify.net
+emailage.com
+telesign.com
+
+# ---------------------------------------------------------------------------
+# Bot management and CAPTCHA challenge providers
+#
+# Blocking these does not remove the challenge — it removes the ability to
+# ANSWER it. The user is left on a login page with a blank rectangle where the
+# CAPTCHA should be and no path forward at all.
+perimeterx.net
+px-cloud.net
+px-cdn.net
+datadome.co
+shieldsquare.com
+arkoselabs.com
+funcaptcha.com
+hcaptcha.com
+geetest.com
+recaptcha.net
+challenges.cloudflare.com
+
+# ---------------------------------------------------------------------------
+# Behavioural biometrics and browser fingerprinting libraries
+#
+# Keystroke cadence, touch pressure, gyroscope drift, canvas/WebGL hashing.
+# Fraud teams treat a missing signal as a positive fraud indicator, so blocking
+# these can score the user WORSE than allowing them — a step-up SMS challenge or
+# an outright decline rather than a clean login.
+biocatch.com
+nudatasecurity.com
+featurespace.co.uk
+fingerprintjs.com
+fingerprint.com
+fpjs.io
