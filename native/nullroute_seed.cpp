@@ -89,12 +89,23 @@
  * than a missing dependency with three known remedies.
  */
 #if __has_include(<lzma.h>)
+#define NR_XZ_XZUTILS 1
 #include <lzma.h>
+#elif __has_include(<Xz.h>)
+/* Remedy (b). BestROM's tree has external/lzma, the LZMA SDK, and `liblzma`
+ * resolves to it; there is no external/xz-utils to import. xz_decode() below
+ * therefore has two bodies, picked by the same __has_include that chose the
+ * header. Both take and return the same things and enforce the same 64 MiB
+ * output ceiling, so nothing outside this file changes. */
+#define NR_XZ_SDK 1
+#include <stdlib.h>
+
+#include <Xz.h>
 #else
-#error "nullroute_seed needs xz-utils liblzma (<lzma.h>). This tree does not have it. \
-Either (a) import external/xz-utils and point shared_libs:[\"liblzma\"] at it, \
-(b) port xz_decode() below to the LZMA SDK (<Xz.h>, XzUnpacker_Code) that \
-external/lzma provides, or (c) regenerate prebuilt/baseline.domains.xz \
+#error "nullroute_seed needs an xz decoder: xz-utils liblzma (<lzma.h>) or the \
+LZMA SDK (<Xz.h>). This tree has neither. Either (a) import external/xz-utils \
+and point shared_libs:[\"liblzma\"] at it, (b) extend xz_decode() below to \
+whatever this tree does provide, or (c) regenerate prebuilt/baseline.domains.xz \
 uncompressed — load_baseline() already sniffs the xz magic and accepts a plain \
 payload, so only tools/gen_baseline.py and the file name would change."
 #endif
@@ -284,6 +295,71 @@ bool looks_like_xz(const std::string& s) {
  * output. This runs at post-fs-data as a system-uid process; a decompression
  * bomb in a file we shipped ourselves is unlikely, but "unlikely" is not a
  * memory limit. */
+#if defined(NR_XZ_SDK)
+
+/* The SDK takes an allocator rather than a memory limit, so the decoder-side
+ * ceiling xz-utils gives us for free is not available here. The output ceiling
+ * below is unchanged and is the one that actually bounds a decompression bomb. */
+void* sdk_alloc(ISzAllocPtr, size_t size) { return size ? malloc(size) : nullptr; }
+void sdk_free(ISzAllocPtr, void* addr) { free(addr); }
+const ISzAlloc kSdkAlloc = {sdk_alloc, sdk_free};
+
+bool xz_decode(const std::string& in, std::string* out, std::string* err) {
+    static const size_t kMaxOut = 64u << 20;
+
+    CXzUnpacker st;
+    XzUnpacker_Construct(&st, &kSdkAlloc);
+    XzUnpacker_Init(&st);
+
+    out->clear();
+    std::vector<uint8_t> buf(256 * 1024);
+    size_t in_pos = 0;
+
+    for (;;) {
+        SizeT dest_len = buf.size();
+        SizeT src_len = in.size() - in_pos;
+        ECoderStatus status = CODER_STATUS_NOT_SPECIFIED;
+        /* srcFinished is 1 because the whole file is already in `in`; it is what
+         * lets the decoder report a truncated stream instead of waiting for
+         * bytes that are never coming. */
+        const SRes rc = XzUnpacker_Code(&st, buf.data(), &dest_len,
+                                        (const Byte*)in.data() + in_pos, &src_len,
+                                        1, CODER_FINISH_END, &status);
+        if (rc != SZ_OK) {
+            *err = "corrupt xz stream";
+            XzUnpacker_Free(&st);
+            out->clear();
+            return false;
+        }
+        if (out->size() + dest_len > kMaxOut) {
+            *err = "baseline expands past the 64 MiB ceiling";
+            XzUnpacker_Free(&st);
+            out->clear();
+            return false;
+        }
+        out->append((const char*)buf.data(), dest_len);
+        in_pos += src_len;
+        if (status == CODER_STATUS_FINISHED_WITH_MARK) break;
+        if (dest_len == 0 && src_len == 0) {
+            *err = "truncated xz stream";
+            XzUnpacker_Free(&st);
+            out->clear();
+            return false;
+        }
+    }
+
+    const bool finished = XzUnpacker_IsStreamWasFinished(&st) != 0;
+    XzUnpacker_Free(&st);
+    if (!finished) {
+        *err = "truncated xz stream";
+        out->clear();
+        return false;
+    }
+    return true;
+}
+
+#else
+
 bool xz_decode(const std::string& in, std::string* out, std::string* err) {
     static const uint64_t kMemLimit = 64ull << 20;
     static const size_t   kMaxOut   = 64u << 20;
@@ -328,6 +404,8 @@ bool xz_decode(const std::string& in, std::string* out, std::string* err) {
     lzma_end(&strm);
     return true;
 }
+
+#endif  // NR_XZ_SDK
 
 enum class LineMode { Plain, Rev, FrontRev };
 

@@ -123,7 +123,13 @@ cc_library_static {
         // loses one of the two very much does.
         "native/NrCtlCore.cpp",
     ],
-    static_libs: ["libnrfilter"],
+    // whole_static_libs, not static_libs. Soong does not re-export a static
+    // library's own static_libs to whatever links it, so with `static_libs`
+    // every consumer of libnrcore (libnrjni, nrctl, nullroute_seed) fails to
+    // link with undefined nr::nr_evaluate / nr::nr_canonicalize. Folding the
+    // matcher into libnrcore keeps the promise made above and in libnrjni: one
+    // nr_evaluate(), reached the same way by the app, the CLI and the seeder.
+    whole_static_libs: ["libnrfilter"],
     header_libs: ["libnrformat_headers"],
     export_header_lib_headers: ["libnrformat_headers"],
     shared_libs: [
@@ -132,6 +138,12 @@ cc_library_static {
     ],
     cflags: [
         "-O2",
+        // -fexceptions is not redundant. Soong compiles C++ with -fno-exceptions
+        // by default, so without this the "exceptions stay ENABLED here" note
+        // above is false: a std::bad_alloc raised inside libc++ cannot unwind
+        // through these frames, it terminates in them. libnrjni's catch-all
+        // entry points depend on this being real.
+        "-fexceptions",
         "-Wall",
         "-Wextra",
         "-Werror",
@@ -204,6 +216,11 @@ cc_library_shared {
         "libz",
     ],
     cflags: [
+        // native/jni_deep.cpp wraps every JNI entry point in try/catch, and
+        // Soong compiles C++ with -fno-exceptions by default, so this is what
+        // makes the file compile at all. It stays OFF in libnrfilter, which runs
+        // inside netd where an abort restarts zygote.
+        "-fexceptions",
         "-Wall",
         "-Wextra",
         "-Werror",
