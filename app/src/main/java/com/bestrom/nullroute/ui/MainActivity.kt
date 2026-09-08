@@ -2,14 +2,23 @@ package com.bestrom.nullroute.ui
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.Menu
+import android.view.MenuItem
 import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
 import com.bestrom.nullroute.R
+import com.bestrom.nullroute.qs.TilePrefsActivity
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.bottomnavigation.BottomNavigationView
 
 /**
- * The four Phase 1 screens: Home, Profile, Update, Diagnostics.
+ * Four tabs — Home, Profile, Update, Diagnostics — plus a toolbar overflow for
+ * the ten screens past them. A BottomNavigationView holds five destinations at
+ * most, so the overflow is not a stylistic choice; the alternative is hiding
+ * whole features behind a nav bar that cannot show them.
+ *
+ * Overflow destinations are PUSHED onto the back stack rather than swapped like
+ * a tab, so `back` returns to the tab the user was on instead of exiting.
  *
  * Views and `findViewById`, no Compose and no ViewBinding — Soong supports none
  * of the three, and this app is built by Soong.
@@ -34,6 +43,43 @@ class MainActivity : AppCompatActivity() {
         if (savedInstanceState == null) {
             select(intent.getIntExtra(EXTRA_OPEN_TAB, TAB_HOME), fromUser = false)
         }
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.menu_overflow, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        val fragment: Fragment = when (item.itemId) {
+            R.id.menu_rules -> RulesFragment()
+            R.id.menu_query -> QueryFragment()
+            R.id.menu_apps -> AppPolicyFragment()
+            R.id.menu_categories -> CategoriesFragment()
+            R.id.menu_sources -> SourceEditFragment()
+            R.id.menu_log -> LogFragment()
+            R.id.menu_deep -> DeepModeFragment()
+            R.id.menu_selftest -> SelfTestFragment()
+            R.id.menu_advanced -> AdvancedFragment()
+            R.id.menu_settings -> SettingsFragment()
+            else -> return super.onOptionsItemSelected(item)
+        }
+        push(fragment, item.title?.toString().orEmpty())
+        return true
+    }
+
+    /**
+     * Push a non-tab destination. Named in the back stack so a second tap on the
+     * same overflow item does not stack a duplicate on top of itself.
+     */
+    private fun push(fragment: Fragment, title: String) {
+        val tag = fragment.javaClass.simpleName
+        supportFragmentManager.popBackStack(tag, 0)
+        supportFragmentManager.beginTransaction()
+            .replace(R.id.fragment_container, fragment, tag)
+            .addToBackStack(tag)
+            .commit()
+        toolbar.title = title
     }
 
     /** The degraded-state notification deep-links straight into Diagnostics. */

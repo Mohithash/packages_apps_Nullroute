@@ -3,13 +3,20 @@ package com.bestrom.nullroute.ctl
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
 import com.bestrom.nullroute.NullrouteApp
 import com.bestrom.nullroute.core.ControlPage
+import com.bestrom.nullroute.core.Generation
+import com.bestrom.nullroute.deep.DeepVpnService
+import com.bestrom.nullroute.deep.DeepWatchdog
+import com.bestrom.nullroute.export.SettingsArchive
+import com.bestrom.nullroute.importer.HostsImporter
 import com.bestrom.nullroute.job.HealthWatchdog
 import com.bestrom.nullroute.job.UpdateJobService
+import java.io.File
 
 /**
  * The control channel for `nrctl`'s mutating verbs.
@@ -98,6 +105,70 @@ class CtlReceiver : BroadcastReceiver() {
                 runCatching { HealthWatchdog.runCheck(context) }
             }
 
+            // A path from a privileged caller, not from the file system: the
+            // sender is already gated to {root, system, shell}, so the check that
+            // matters is whether the APP can read it. /data/local/tmp cannot be
+            // read by an app at all, which is why nrctl says so in its output.
+            VERB_IMPORT -> {
+                val path = intent.getStringExtra(EXTRA_PATH)
+                if (path.isNullOrEmpty()) {
+                    Log.w(TAG, "import with no $EXTRA_PATH extra")
+                    return
+                }
+                NullrouteApp.io.execute {
+                    runCatching {
+                        val plan = HostsImporter.preview(context, Uri.fromFile(File(path)))
+                        Log.i(TAG, "import $path -> ${plan.commit(context)}")
+                    }.onFailure { Log.w(TAG, "import $path failed", it) }
+                }
+            }
+
+            VERB_EXPORT -> {
+                val path = intent.getStringExtra(EXTRA_PATH) ?: DEFAULT_EXPORT_PATH
+                NullrouteApp.io.execute {
+                    runCatching {
+                        val file = File(path)
+                        file.parentFile?.mkdirs()
+                        Log.i(TAG, "export $path: ${SettingsArchive.export(context, Uri.fromFile(file)).bytes} bytes")
+                    }.onFailure { Log.w(TAG, "export $path failed", it) }
+                }
+            }
+
+            VERB_ROLLBACK -> NullrouteApp.io.execute {
+                if (!Generation.canRollback()) {
+                    Log.w(TAG, "rollback refused: no previous index")
+                } else {
+                    Log.i(TAG, "rollback: ${Generation.rollback(context).describe()}")
+                }
+            }
+
+            VERB_DEEP -> {
+                val enable = intent.getBooleanExtra(EXTRA_ENABLE, false)
+                DeepWatchdog.setEnabled(context, enable)
+                if (!enable) {
+                    DeepVpnService.stop(context)
+                } else if (DeepVpnService.prepareIntent(context) == null) {
+                    DeepVpnService.start(context)
+                } else {
+                    // Consent has never been granted and a broadcast cannot grant
+                    // it. Starting anyway would fail at establish() and spend one
+                    // of the watchdog's three lives on something that is not a
+                    // malfunction. The flag is still set, so the app asks the next
+                    // time the screen opens.
+                    Log.w(TAG, "deep on requested but VPN consent has not been granted")
+                }
+            }
+
+            // Every switch at once. Deliberately touches no user DATA: panic is
+            // for a device that cannot resolve anything, and a verb that also
+            // deleted rules would be one nobody could safely try.
+            VERB_PANIC -> {
+                setMode(context, ControlPage.MODE_OFF)
+                DeepWatchdog.setEnabled(context, false)
+                DeepVpnService.stop(context)
+                Log.w(TAG, "panic: mode=off, deep=off")
+            }
+
             else -> Log.w(TAG, "unknown CTL verb \"$verb\"")
         }
     }
@@ -124,6 +195,18 @@ class CtlReceiver : BroadcastReceiver() {
         const val VERB_MODE = "mode"
         const val VERB_UPDATE = "update"
         const val VERB_CHECK = "check"
+
+        const val EXTRA_PATH = "path"
+        const val EXTRA_ENABLE = "enable"
+
+        const val VERB_IMPORT = "import"
+        const val VERB_EXPORT = "export"
+        const val VERB_ROLLBACK = "rollback"
+        const val VERB_DEEP = "deep"
+        const val VERB_PANIC = "panic"
+
+        /** Where `nrctl export` writes when it is given no path. */
+        const val DEFAULT_EXPORT_PATH = "/data/misc/nullroute/priv/nullroute-settings.zip"
 
         /**
          * root, system, shell. Note that uid 2000 is only reachable if the ROM

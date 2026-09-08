@@ -92,9 +92,10 @@ cc_library_static {
 // Builder / CLI / JNI side — app process only, never netd
 // ---------------------------------------------------------------------------
 
-// NrBuilder.cpp carries the line parser and the suffix collapse as well as the
-// serializer; they are one translation unit on purpose so that nrtest can build
-// the exact bytes the device will map, with no second code path.
+// NrBuilder.cpp is the serializer. The line parser, the suffix collapse and the
+// UI-only rule-text blob are separate translation units so each can be reasoned
+// about, timed and fuzzed on its own; nrtest links the same set, so it still
+// builds the exact bytes the device will map with no second code path.
 //
 // Exceptions stay ENABLED here (unlike libnrfilter): this side allocates freely
 // while merging hundreds of thousands of entries, and a std::bad_alloc that
@@ -103,12 +104,6 @@ cc_library_static {
 // NrCtl.cpp. `native/NrCtl.cpp` and `native/nrctl.cpp` differ only in case and so
 // cannot coexist in a checkout on a case-insensitive filesystem; Soong does not
 // care, a developer whose checkout silently loses one of the two very much does.
-//
-// NrStrings.cpp (SPEC §5, the front-coded NR_SEC_STR rule-text blob) is NOT
-// listed: it does not exist yet and nothing in native/include declares anything
-// from it. Add it back to this list in the same commit that adds the file —
-// a src that does not exist is a hard Soong error on EVERY `mka`, including
-// `mka Nullroute`, not just on the module that names it.
 cc_library_static {
     name: "libnrcore",
     srcs: [
@@ -273,6 +268,21 @@ cc_fuzz {
 // inside netd for the H3 raw-query hook, and netd's init stanza carries
 // `onrestart restart zygote` — so a parser bug here is a boot loop, not a failed
 // lookup. Header-only and dependency-free, hence no static_libs.
+// CNAME uncloaking walks the ANSWER section of a real DNS reply inside netd.
+// Same exposure as the wire fuzzer and the same consequence for a parser fault.
+cc_fuzz {
+    name: "nr_cname_fuzzer",
+    srcs: ["native/fuzz/nr_cname_fuzzer.cpp"],
+    header_libs: ["libnrformat_headers"],
+    include_dirs: ["packages/apps/Nullroute/resolver-patch/nullroute"],
+    host_supported: true,
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+}
+
 cc_fuzz {
     name: "nr_wire_fuzzer",
     srcs: ["native/fuzz/nr_wire_fuzzer.cpp"],

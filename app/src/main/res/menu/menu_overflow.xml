@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The bottom bar holds five destinations at most, so everything past the daily
+    four lives here. These are push destinations, not tabs: they replace the
+    fragment container and the back stack returns to the tab the user came from.
+-->
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@+id/menu_rules"      android:title="@string/tab_rules" />
+    <item android:id="@+id/menu_query"      android:title="@string/tab_query" />
+    <item android:id="@+id/menu_apps"       android:title="@string/tab_apps" />
+    <item android:id="@+id/menu_categories" android:title="@string/tab_categories" />
+    <item android:id="@+id/menu_sources"    android:title="@string/tab_sources" />
+    <item android:id="@+id/menu_log"        android:title="@string/tab_log" />
+    <item android:id="@+id/menu_deep"       android:title="@string/tab_deep" />
+    <item android:id="@+id/menu_selftest"   android:title="@string/tab_selftest" />
+    <item android:id="@+id/menu_advanced"   android:title="@string/tab_advanced" />
+    <item android:id="@+id/menu_settings"   android:title="@string/tab_settings" />
+</menu>

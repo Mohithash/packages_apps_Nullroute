@@ -270,5 +270,21 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Filters DNS for every app on the device; the tunnel must stay established while the screen is off, or name resolution stops." />
         </service>
+
+        <!-- First run. Not exported: it is reached only by MainActivity. -->
+        <activity
+            android:name=".ui.OnboardingActivity"
+            android:exported="false"
+            android:label="@string/app_name" />
+
+        <!-- Quick Settings tile configuration, launched by the tile itself. -->
+        <activity
+            android:name=".qs.TilePrefsActivity"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
+            </intent-filter>
+        </activity>
     </application>
 </manifest>

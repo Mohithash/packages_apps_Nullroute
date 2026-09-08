@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tab_rules">Rules</string>
+    <string name="tab_query">Check a domain</string>
+    <string name="tab_apps">Apps</string>
+    <string name="tab_categories">Categories</string>
+    <string name="tab_sources">Sources</string>
+    <string name="tab_log">Log</string>
+    <string name="tab_deep">Deep mode</string>
+    <string name="tab_selftest">Test my blocking</string>
+    <string name="tab_advanced">Advanced</string>
+    <string name="tab_settings">Settings</string>
+</resources>
