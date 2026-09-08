@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    anydpi-v26 with no density-specific fallbacks: min_sdk is 33, so every device
+    that can install this app supports adaptive icons. The monochrome layer makes
+    the icon participate in themed icons instead of being the one square that
+    ignores the user's wallpaper palette.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>

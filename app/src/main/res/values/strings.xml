@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <string name="app_name">Nullroute</string>
+    <string name="settings_entry_summary">Block ad, tracker and malware domains</string>
+
+    <string name="tab_home">Status</string>
+    <string name="tab_profile">Profile</string>
+    <string name="tab_update">Update</string>
+    <string name="tab_diagnostics">Diagnostics</string>
+
+    <!-- Notification channel -->
+    <string name="channel_status">Filter status</string>
+    <string name="channel_status_desc">Warns you when domain filtering has stopped working.</string>
+
+    <!--
+        STATUS COPY.
+
+        Every one of these strings is chosen by Probes.Health.status(), which is
+        computed from the two .invalid probes and the mode byte. None of them is
+        ever shown on the basis of "the index file exists" or "we counted some
+        blocks", because both of those stay true while the filter is dead.
+    -->
+    <string name="status_checking">Checking…</string>
+    <string name="status_checking_detail">Asking the system resolver to prove the filter is live.</string>
+
+    <string name="status_protected">Protected</string>
+    <string name="status_protected_detail">The resolver filter answered, and the built-in list is intact.</string>
+    <string name="status_protected_no_l0_detail">The resolver filter answered. The built-in fallback list is missing — see Diagnostics; this is not urgent.</string>
+
+    <string name="status_limited">Limited</string>
+    <string name="status_limited_detail">Running on the built-in list only. The resolver filter did not answer, so wildcards, your own rules and the downloaded lists are not being applied. See Diagnostics.</string>
+
+    <string name="status_not_filtering">Not filtering</string>
+    <string name="status_not_filtering_detail">Neither the resolver filter nor the built-in list answered. No domains are being blocked. Open Diagnostics to see why.</string>
+
+    <!--
+        PAUSED / OFF / KILLED all leave the L0 hosts layer running.
+
+        The resolver only skips the /system/etc/hosts scan while it is actively
+        enforcing: NrFilter::hostsLayerSuperseded() bails on the kill switch AND
+        on any mode other than ENFORCE. So pausing hands filtering back to the
+        baked ~2,000-entry list rather than switching everything off, and which
+        of each pair of strings applies is decided by what probe B measured — not
+        by assumption.
+    -->
+    <string name="status_paused">Paused</string>
+    <string name="status_paused_detail_l0">Your downloaded lists and your own rules are not being applied. The built-in list is still blocking about 2,000 domains. The resolver check below is skipped while paused — that is by design, not a fault.</string>
+    <string name="status_paused_detail">Paused, and the built-in list did not answer either. No domains are being blocked. The resolver check below is skipped while paused — that is by design, not a fault.</string>
+
+    <string name="status_off">Switched off</string>
+    <string name="status_off_detail_l0">Your downloaded lists and your own rules are not being applied. The built-in list is still blocking about 2,000 domains — the resolver goes back to consulting it whenever filtering is not enforcing.</string>
+    <string name="status_off_detail">Switched off, and the built-in list did not answer either. No domains are being blocked.</string>
+
+    <string name="status_killed">Kill switch is on</string>
+    <string name="status_killed_detail_l0">The resolver filter is disabled by persist.sys.nullroute.kill. The built-in list is still blocking about 2,000 domains. Clear the property and reboot to restore full filtering.</string>
+    <string name="status_killed_detail">The resolver filter is disabled by persist.sys.nullroute.kill, and the built-in list did not answer either. Nothing is being blocked.</string>
+
+    <string name="status_unknown">Status unknown</string>
+    <string name="status_unknown_detail">The check could not be completed. Nullroute will not claim to be protecting you when it has not been able to confirm it.</string>
+
+    <!-- Evidence rows -->
+    <string name="home_evidence_header">How this was checked</string>
+    <string name="home_probe_idx_label">Resolver filter</string>
+    <string name="home_probe_hosts_label">Built-in list</string>
+    <string name="home_state_prop_label">Resolver reports</string>
+    <string name="probe_pending">checking…</string>
+    <string name="probe_ok">answered %1$s</string>
+    <string name="probe_failed">no answer</string>
+    <!-- Probe A is skipped, not failed, in these three states — see
+         HomeFragment.idxProbeText and Probes.sample. -->
+    <string name="probe_paused">not checked while paused</string>
+    <string name="probe_off">not checked while switched off</string>
+    <string name="probe_killed">not checked — kill switch is on</string>
+
+    <string name="home_telemetry_header">Resolver counters</string>
+    <string name="home_telemetry_caption">Secondary telemetry. These counters live inside the shared page whose mapping is the most likely thing to fail, so they are never used to decide the status above.</string>
+    <string name="telemetry_unavailable">Not available — the shared control page is not mapped.</string>
+    <string name="telemetry_counts">%1$d blocked of %2$d lookups, serving generation %3$d</string>
+
+    <!--
+        HONEST SCOPE. Verbatim from the specification, and shown on the first
+        screen rather than buried in an About page. A product that only works for
+        some of the traffic has to say which.
+    -->
+    <string name="home_scope_header">What this does and does not cover</string>
+    <string name="scope_sentence">Nullroute blocks ad, tracker and malware domains for apps that use Android\'s system resolver. It does not block ads served from the same domain as the content (YouTube, Instagram, Spotify), and it does not filter Chrome or other apps that run their own DNS — turn on Deep mode for those.</string>
+    <string name="scope_deep_note">Deep mode is not part of this build yet. Until it ships, Chrome, WebView and any app with its own DNS are not filtered at all.</string>
+
+    <string name="action_pause">Pause filtering</string>
+    <string name="action_resume">Resume filtering</string>
+    <string name="action_recheck">Check again</string>
+    <string name="action_update_now">Update now</string>
+
+    <!-- Profile -->
+    <string name="profile_header">Choose how much to block</string>
+    <string name="profile_header_note">Every profile costs the same per lookup — about 200 nanoseconds. The only difference is how much gets blocked and how often something breaks.</string>
+    <string name="profile_source_detail">%1$d lists, %2$d of them downloaded to this device</string>
+    <string name="profile_change_pending">Saved. The new profile takes effect after the next update — go to Update and tap Update now.</string>
+    <string name="profile_licence_note">Lists under the GPL or MPL are never shipped inside the ROM. Their addresses ship; the lists themselves are downloaded and compiled here, on your device.</string>
+
+    <!-- Update -->
+    <string name="update_never">Never updated on this device.</string>
+    <string name="update_last_ok">Updated %1$s — %2$s</string>
+    <string name="update_last_failed">Last attempt %1$s failed — %2$s</string>
+    <string name="update_profile_line">Profile: %1$s (%2$d lists)</string>
+    <string name="update_ready">Ready.</string>
+    <string name="update_metered">Connected, but this network is metered. Updating now will use your data.</string>
+    <string name="update_no_network">No network connection.</string>
+    <string name="update_starting">Starting…</string>
+    <string name="update_fetching">Downloading %1$d of %2$d: %3$s</string>
+    <string name="update_overlaying">Applying your rules…</string>
+    <string name="update_compiling">Compiling the index…</string>
+    <string name="update_checking">Running safety checks…</string>
+    <string name="update_promoting">Publishing…</string>
+    <string name="update_row_sources">Lists</string>
+    <string name="update_row_unavailable">Unavailable</string>
+    <string name="update_row_compiled">Compiled</string>
+    <string name="update_row_compiled_detail">%1$d entries collapsed to %2$d, %3$d KiB</string>
+    <string name="update_row_done">Published</string>
+    <string name="update_row_done_detail">generation %1$d in %2$d s</string>
+    <string name="update_row_advisory">Advisory</string>
+    <string name="update_row_rejected">Rejected</string>
+
+    <!--
+        Quick Settings tile. The subtitle always describes the LAST verified
+        check, never a live one — the tile renders on the system UI's thread and
+        a failing probe is exactly the case that takes seconds to return.
+    -->
+    <string name="tile_on">Protected</string>
+    <string name="tile_limited">Limited</string>
+    <string name="tile_not_filtering">Not filtering</string>
+    <string name="tile_paused">Paused</string>
+    <string name="tile_killed">Kill switch on</string>
+    <string name="tile_checking">Checking…</string>
+    <string name="tile_unavailable">Unavailable</string>
+
+    <!-- Diagnostics -->
+    <string name="diag_header_health">Health</string>
+    <string name="diag_header_switches">Switches</string>
+    <string name="diag_header_control">Control page</string>
+    <string name="diag_header_index">Index</string>
+    <string name="diag_header_hosts">Built-in list (L0)</string>
+    <string name="diag_header_storage">Storage and privileges</string>
+    <string name="diag_header_config">Configuration</string>
+    <string name="diag_copy">Copy all</string>
+    <string name="diag_copied">Copied. No domain names are included.</string>
+
+</resources>

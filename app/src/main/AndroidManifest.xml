@@ -1,0 +1,274 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Nullroute — app manifest.
+
+    NO package= attribute: AGP 8 rejects it in the source manifest and
+    manifest_fixer.py cannot add one, so the `nullroute_soong_manifest` genrule
+    seds it in for Soong (same trick as packages/apps/Freezer). Do not add it
+    back; do not add <uses-sdk> either — min/target come from Android.bp for the
+    shipping build and from build.gradle.kts for the parity build.
+
+
+    ==== PERMISSION BUDGET — read before adding anything ====================
+
+    Every permission below is used by Phase 1 code. Justifications:
+
+      INTERNET               net/Downloader.kt — fetching blocklists. The whole
+                             licensing posture (§7.6) depends on the copyleft
+                             lists being fetched and compiled ON DEVICE, so this
+                             is not optional.
+      ACCESS_NETWORK_STATE   job/UpdateJobService.kt — unmetered/metered gating
+                             and the JobScheduler network constraint. Replaces
+                             Re-Malwack's `ping -c 1 8.8.8.8`.
+      RECEIVE_BOOT_COMPLETED job/BootReceiver.kt — LOCKED_BOOT_COMPLETED, which
+                             is what arms the boot-loop breaker's 120 s timer.
+      POST_NOTIFICATIONS     job/HealthWatchdog.kt — the "Not filtering"
+                             notification. Runtime permission, pre-granted by
+                             rom/default-permissions-nullroute.xml.
+      READ/WRITE_DEVICE_CONFIG
+                             job/DeviceConfigFixups.kt — tethering
+                             close_quic_connection = -1. Both are pure
+                             `signature`, so they need NO privapp entry.
+      ...permission.STATE    Declared by us, protectionLevel=signature. Its only
+                             purpose is the <group gid="misc"/> mapping in
+                             rom/nullroute-gid.xml (§8.7): that is what puts this
+                             process in AID_MISC (9998) so DAC lets it write
+                             /data/misc/nullroute. Without it every open() there
+                             is EACCES and SELinux never even gets consulted.
+      ...permission.CTL      Declared by us, protectionLevel=signature. Guards
+                             CtlReceiver. See the note on the receiver.
+
+
+    ==== NOTE FOR WHOEVER WRITES rom/privapp-permissions-*.xml ==============
+
+    Do NOT derive that file from this manifest alone.
+
+    `ro.control_privapp_permissions=enforce` aborts boot when a
+    signature|privileged permission appears in the manifest but not in the
+    allowlist, and the allowlist is baked into the signed image — it cannot be
+    updated out of band with an APK. Over-listing is inert; under-listing
+    bricks. So the XML must carry the FULL frozen set from SPEC §8.8 today, even
+    though Phase 1 declares none of them here:
+
+        PACKAGE_USAGE_STATS, FORCE_STOP_PACKAGES, WRITE_SECURE_SETTINGS,
+        INTERACT_ACROSS_USERS, INTERACT_ACROSS_USERS_FULL, DUMP,
+        REAL_GET_TASKS, GET_APP_OPS_STATS, UPDATE_APP_OPS_STATS,
+        START_ACTIVITIES_FROM_BACKGROUND, OBSERVE_NETWORK_POLICY, MANAGE_USERS
+
+    Phase 2/3 APK updates then add the matching <uses-permission> lines here
+    without touching the image.
+
+    That same file (or a sibling in /system_ext/etc/permissions) also needs
+
+        <assign-permission name="com.bestrom.nullroute.permission.CTL" uid="shell" />
+
+    or the uid 2000 arm of the nrctl gate below is unreachable: uid 0 and 1000
+    bypass permission checks inside ActivityManager, but shell does not, and
+    com.android.shell does not <uses-permission> a permission it has never heard
+    of. Without the assignment nrctl's mutating verbs work as root only — which
+    is a safe failure, not a broken one.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.READ_DEVICE_CONFIG" />
+    <uses-permission android:name="android.permission.WRITE_DEVICE_CONFIG" />
+
+    <!--
+        Phase 4, Deep mode. Both are normal protection level, so neither needs a
+        privapp-permissions entry and neither can affect boot under
+        ro.control_privapp_permissions=enforce. FOREGROUND_SERVICE_SPECIAL_USE is
+        API 34+; declaring it on a lower API is inert.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <!--
+        Phase 3, core/ForegroundAppTracker.kt — which app is in front of the
+        user, so the breakage notifier can attribute a burst of blocks to it
+        rather than to a bare uid. Both are signature|privileged and both are
+        ALREADY in the frozen privapp allowlist, so adding them here is an
+        APK-only change that cannot break boot.
+
+        PACKAGE_USAGE_STATS  UsageStatsManager.queryEvents — activity-resume
+                             events, the only API that reports what the user is
+                             actually looking at. Also needs the AppOp; without
+                             it queryEvents returns an empty cursor rather than
+                             throwing, which the tracker reports as "unknown".
+        REAL_GET_TASKS       the coarser getRunningAppProcesses fallback.
+    -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
+    <uses-permission android:name="android.permission.REAL_GET_TASKS" />
+
+    <!--
+        Declared here as well as mapped in rom/nullroute-gid.xml so the
+        permission exists even if the etc/permissions file is dropped from a
+        build; the gid mapping is what actually does the work. `signature` is
+        trivially satisfied — we are our own signer.
+    -->
+    <permission
+        android:name="com.bestrom.nullroute.permission.STATE"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="com.bestrom.nullroute.permission.STATE" />
+
+    <permission
+        android:name="com.bestrom.nullroute.permission.CTL"
+        android:protectionLevel="signature" />
+
+    <application
+        android:name=".NullrouteApp"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Nullroute"
+        android:usesCleartextTraffic="false"
+        android:directBootAware="true">
+
+        <!--
+            directBootAware on <application>, but deliberately NOT
+            defaultToDeviceProtectedStorage: that would move the Phase 3 query
+            log into DE storage too, and a seized-but-locked device would then
+            expose the user's DNS history. The index and control page live in
+            /data/misc (DE) by explicit path; only the log is CE. See
+            core/Paths.kt.
+        -->
+
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+            Settings injection. The category value is what puts the row under
+            Settings > Network & internet; the title/summary/icon metadata is
+            what Settings renders without launching us.
+        -->
+        <activity
+            android:name=".ui.SettingsEntryActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="com.android.settings.action.IA_SETTINGS" />
+            </intent-filter>
+            <meta-data
+                android:name="com.android.settings.category"
+                android:value="com.android.settings.category.ia.network" />
+            <meta-data
+                android:name="com.android.settings.title"
+                android:resource="@string/app_name" />
+            <meta-data
+                android:name="com.android.settings.summary"
+                android:resource="@string/settings_entry_summary" />
+            <meta-data
+                android:name="com.android.settings.icon"
+                android:resource="@drawable/ic_nullroute" />
+            <meta-data
+                android:name="com.android.settings.order"
+                android:value="-40" />
+        </activity>
+
+        <!--
+            One JobService, two job ids (see job/HealthWatchdog.kt and
+            job/UpdateJobService.kt). directBootAware because the boot-health job
+            must be able to run before first unlock — that is the whole point of
+            the 120 s timer.
+        -->
+        <service
+            android:name=".job.UpdateJobService"
+            android:directBootAware="true"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <service
+            android:name=".qs.NullrouteTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_nullroute"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <!-- Not an ACTIVE_TILE: the tile reports the last verified probe
+                 result and never blocks the system UI thread on a DNS lookup. -->
+            <meta-data
+                android:name="android.service.quicksettings.ACTIVE_TILE"
+                android:value="false" />
+        </service>
+
+        <receiver
+            android:name=".job.BootReceiver"
+            android:directBootAware="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+            The nrctl control channel (F2). THREE independent gates, because the
+            obvious one does not work: Binder.getCallingUid() inside onReceive()
+            returns OUR uid — there is no ongoing binder transaction there — so
+            the gate everybody writes first is a no-op.
+              1. android:permission, checked against the SENDER;
+              2. BroadcastReceiver.getSentFromUid() (API 34+), the only API that
+                 actually names the sender inside onReceive();
+              3. an explicit {0, 1000, 2000} allowlist in code.
+        -->
+        <receiver
+            android:name=".ctl.CtlReceiver"
+            android:directBootAware="true"
+            android:exported="true"
+            android:permission="com.bestrom.nullroute.permission.CTL">
+            <intent-filter>
+                <action android:name="com.bestrom.nullroute.action.CTL" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+            Phase 4, Deep mode: the DNS-only VpnService.
+
+            exported + BIND_VPN_SERVICE + the android.net.VpnService action are
+            all mandatory — the framework binds this, and without the permission
+            any app could.
+
+            foregroundServiceType: Android 14 requires a type on every foreground
+            service and offers no VPN-specific one, so "specialUse" plus the
+            subtype property is the documented fallback. On a privileged build
+            "systemExempted" is also available; if you switch, keep the property
+            (inert for other types) and watch logcat for "startForeground
+            failed" — DeepVpnService catches that rather than crashing, so a
+            wrong type degrades quietly and has to be looked for.
+
+            android:directBootAware is deliberately ABSENT. Deep mode could
+            technically start before unlock, but VpnService.prepare() consent is
+            a user decision and the tunnel takes the device's only VPN slot;
+            neither belongs in the pre-unlock window.
+        -->
+        <service
+            android:name=".deep.DeepVpnService"
+            android:exported="true"
+            android:foregroundServiceType="specialUse"
+            android:permission="android.permission.BIND_VPN_SERVICE">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Filters DNS for every app on the device; the tunnel must stay established while the screen is off, or name resolution stops." />
+        </service>
+    </application>
+</manifest>

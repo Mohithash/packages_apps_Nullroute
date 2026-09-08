@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Material3 DayNight, with no colour overrides: on a Lineage-derived ROM the
+    user has already chosen an accent, and a system component that ignores it
+    looks like a third-party app that wandered into Settings.
+-->
+<resources>
+
+    <!--
+        No system-bar colour overrides. From API 35 the platform draws edge to
+        edge unconditionally and `android:statusBarColor` /
+        `android:navigationBarColor` are ignored; setting them would be dead
+        weight that reads like configuration. Material3 handles the bar
+        appearance from the theme's light/dark state on its own.
+    -->
+    <style name="Theme.Nullroute" parent="Theme.Material3.DayNight.NoActionBar" />
+
+    <style name="Nullroute.CardTitle" parent="TextAppearance.Material3.TitleMedium" />
+
+    <style name="Nullroute.StatusTitle" parent="TextAppearance.Material3.HeadlineSmall" />
+
+    <style name="Nullroute.Body" parent="TextAppearance.Material3.BodyMedium">
+        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
+    </style>
+
+    <style name="Nullroute.Label" parent="TextAppearance.Material3.LabelLarge" />
+
+    <style name="Nullroute.Caption" parent="TextAppearance.Material3.BodySmall">
+        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
+    </style>
+
+</resources>
