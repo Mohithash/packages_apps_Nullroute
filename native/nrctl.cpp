@@ -33,6 +33,8 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <netdb.h>          /* getaddrinfo, for the Deep-mode probe */
+#include <netinet/in.h>     /* sockaddr_in / INET_ADDRSTRLEN for the same */
 #include <inttypes.h>
 #include <limits.h>
 #include <stdarg.h>
@@ -96,6 +98,52 @@ using namespace nr;
  * a force-stopped app receives no broadcasts at all, and "I force-stopped it and
  * now pause does nothing" is not a debugging experience anyone should have. */
 #define NR_CTL_FLAGS "0x10000020"
+
+/* ---------------------------------------------------------------------------
+ * The second wave of verbs: apps, import, export, rollback, deep, panic.
+ *
+ * TWO EXTRAS ARE NEW, and they are new on BOTH sides. The receiver reads extras
+ * by literal key, so these names have to match `CtlReceiver`'s constants exactly
+ * or the verb marshals perfectly, is delivered successfully, and does nothing —
+ * the failure this whole file is arranged around. What must exist in
+ * ctl/CtlReceiver.kt is written out verbatim in docs/needs-deep.md:
+ *
+ *   const val EXTRA_PATH   = "path"     // import, export     --es path  <PATH>
+ *   const val EXTRA_ENABLE = "enable"   // deep               --ez enable <bool>
+ *   VERB_APPS/IMPORT/EXPORT/ROLLBACK/DEEP/PANIC = "apps"/"import"/…
+ *
+ * `apps` is not in that list because it is a READ verb: the per-app policy table
+ * lives at NR_UID_POLICY_OFF inside control.bin, which `shell` can already map
+ * read-only, so it needs no broadcast and no privilege.
+ *
+ * CONFIRMATION, verb by verb, because "the broadcast was delivered" proves
+ * nothing (see the header comment on the result contract):
+ *
+ *   rollback  provable   — previous.nrdx's generation must become current's
+ *   panic     provable   — control.bin::mode must become off
+ *   export    provable   — the file must appear, if this shell can stat it
+ *   import    NOT provable — the rebuild is asynchronous and minutes long
+ *   deep      NOT provable — Deep mode's state is in the app's DE preferences,
+ *                            which no shell can read; the probe below is
+ *                            evidence, not proof, and is reported as such
+ * ------------------------------------------------------------------------- */
+#define NR_CTL_EXTRA_PATH   "path"
+#define NR_CTL_EXTRA_ENABLE "enable"
+#define NR_APP_PACKAGE      "com.bestrom.nullroute"
+
+/* Where `export` writes when no path is given. Inside priv/ because the app owns
+ * that directory through AID_MISC and can write it without SAF, a content
+ * provider or any storage permission — and because a default that lands in
+ * /sdcard would put the user's rule list somewhere every app can read. */
+#define NR_PATH_EXPORT_DEFAULT NR_DIR_PRIV "/nullroute-settings.zip"
+
+/* Deep mode's liveness probe. Mirrors core/Probes.kt (DEEP / DEEP_EXPECT); the
+ * two `.invalid` probes in NrCtl.h are the resolver's and the hosts layer's, and
+ * this one is answered inside the tunnel by the app rather than by anything
+ * native, which is why it is not up there with them. docs/needs-deep.md asks for
+ * it to be promoted into NrCtl.h so this duplicate can go. */
+#define NR_PROBE_DEEP_NAME "vpn-probe.nullroute.invalid"
+#define NR_PROBE_DEEP_ADDR "127.0.0.9"
 
 namespace {
 
@@ -940,6 +988,637 @@ int cmd_syncprop(Ctx& ctx) {
 }
 
 // ---------------------------------------------------------------------------
+// apps — the per-app policy table (READ)
+// ---------------------------------------------------------------------------
+
+const char* policy_name(uint8_t p) {
+    switch (p) {
+        case NR_POLICY_ENFORCE: return "enforce";
+        case NR_POLICY_EXEMPT:  return "exempt";
+        case NR_POLICY_STRICT:  return "strict";
+        default:                return "invalid";
+    }
+}
+
+struct UidName {
+    uint32_t    app_id;
+    std::string pkg;
+};
+
+/*
+ * appId -> package, from `cmd package list packages -U`.
+ *
+ * BEST EFFORT ON PURPOSE. This is cosmetic: the policy table is indexed by appId
+ * and is complete without any of this. `cmd package` can be missing, can be
+ * refused, and on a device with package-visibility filtering can return a subset
+ * — so a failure here downgrades the output to bare appIds and says so, rather
+ * than failing a read verb over a display detail.
+ */
+bool load_package_names(const Ctx& ctx, std::vector<UidName>* out) {
+    if (access("/system/bin/cmd", X_OK) != 0) return false;
+    char userbuf[16];
+    snprintf(userbuf, sizeof(userbuf), "%d", ctx.user);
+
+    std::string text;
+    const std::vector<std::string> argv = {
+        "/system/bin/cmd", "package", "list", "packages", "-U", "--user", userbuf,
+    };
+    if (run_capture(argv, &text) != 0) return false;
+
+    size_t pos = 0;
+    while (pos < text.size()) {
+        size_t eol = text.find('\n', pos);
+        if (eol == std::string::npos) eol = text.size();
+        const std::string line = text.substr(pos, eol - pos);
+        pos = eol + 1;
+
+        /* "package:com.example.thing uid:10123" */
+        const size_t p = line.find("package:");
+        const size_t u = line.find(" uid:");
+        if (p == std::string::npos || u == std::string::npos || u <= p + 8) continue;
+
+        UidName e;
+        e.pkg = line.substr(p + 8, u - (p + 8));
+        /* uid -> appId is `uid % AID_USER_OFFSET`, and AID_USER_OFFSET is the
+         * same 100000 the table is sized to (NrControl.h) — a secondary user's
+         * 1010123 and the owner's 10123 share one row, which is exactly what
+         * Phase 5's per-user overrides are for. */
+        e.app_id = (uint32_t)(strtoul(line.c_str() + u + 5, nullptr, 10) % NR_UID_POLICY_LEN);
+        out->push_back(e);
+    }
+    return !out->empty();
+}
+
+const std::string* name_for(const std::vector<UidName>& names, uint32_t app_id) {
+    for (const UidName& n : names)
+        if (n.app_id == app_id) return &n.pkg;
+    return nullptr;
+}
+
+/*
+ * Lists the apps whose policy is not the default.
+ *
+ * The table is 100,000 bytes inside a page netd and the app both hold mapped, so
+ * every row here is a plain byte load: a single byte cannot tear, and a row that
+ * changes while we walk it produces a stale answer for that app and nothing
+ * worse. A lock would buy exactness the moment after which it is stale anyway.
+ *
+ * Only the exceptions are printed. Listing 100,000 rows of "enforce" would be a
+ * technically complete answer to a question nobody asked.
+ */
+int cmd_apps(Ctx& ctx) {
+    NrCtlMap ctl;
+    std::string err;
+    if (!nr_ctl_open(ctx.ctl_path.c_str(), false, &ctl, &err)) {
+        warn("cannot read %s: %s", ctx.ctl_path.c_str(), err.c_str());
+        if (ctx.json) print_ctl_error_json("apps", err);
+        return NR_EXIT_UNAVAILABLE;
+    }
+    if (ctl.p == nullptr || ctl.size < (size_t)NR_UID_POLICY_OFF + NR_UID_POLICY_LEN) {
+        nr_ctl_close(&ctl);
+        const std::string e = "control.bin is smaller than the per-app policy table";
+        warn("%s", e.c_str());
+        if (ctx.json) print_ctl_error_json("apps", e);
+        return NR_EXIT_FAIL;
+    }
+
+    std::vector<UidName> names;
+    const bool have_names = load_package_names(ctx, &names);
+
+    /* An argument asks about ONE app, and then "enforce" is a real answer worth
+     * printing — unlike in the list, where it is the default. */
+    if (!ctx.args.empty()) {
+        const std::string& want = ctx.args[0];
+        uint32_t app_id = 0;
+        bool resolved = false;
+        if (want.find_first_not_of("0123456789") == std::string::npos && !want.empty()) {
+            app_id = (uint32_t)(strtoul(want.c_str(), nullptr, 10) % NR_UID_POLICY_LEN);
+            resolved = true;
+        } else {
+            for (const UidName& n : names) {
+                if (n.pkg == want) { app_id = n.app_id; resolved = true; break; }
+            }
+        }
+        if (!resolved) {
+            nr_ctl_close(&ctl);
+            warn("no package '%s' on user %d.%s", want.c_str(), ctx.user,
+                 have_names ? "" : " (package names could not be listed here, so pass a uid)");
+            return NR_EXIT_UNAVAILABLE;
+        }
+        const uint8_t p = ctl.p->uid_policy[app_id];
+        if (ctx.json) {
+            std::string j = "{\"ok\":true,\"app_id\":" + std::to_string(app_id);
+            j += ",\"policy\":\"" + std::string(policy_name(p)) + "\"}";
+            printf("%s\n", j.c_str());
+        } else {
+            printf("appId %u  %s\n", app_id, policy_name(p));
+        }
+        nr_ctl_close(&ctl);
+        return NR_EXIT_OK;
+    }
+
+    std::vector<uint32_t> ids;
+    for (uint32_t i = 0; i < NR_UID_POLICY_LEN; ++i)
+        if (ctl.p->uid_policy[i] != NR_POLICY_ENFORCE) ids.push_back(i);
+
+    if (ctx.json) {
+        std::string j = "{\"ok\":true,\"user\":" + std::to_string(ctx.user);
+        j += ",\"names_resolved\":";
+        j += have_names ? "true" : "false";
+        j += ",\"count\":" + std::to_string(ids.size()) + ",\"apps\":[";
+        for (size_t i = 0; i < ids.size(); ++i) {
+            if (i) j += ",";
+            j += "{\"app_id\":" + std::to_string(ids[i]);
+            const std::string* pkg = name_for(names, ids[i]);
+            if (pkg) {
+                j += ",\"package\":\"";
+                nr_json_escape(pkg->data(), pkg->size(), &j);
+                j += "\"";
+            }
+            j += ",\"policy\":\"" +
+                 std::string(policy_name(ctl.p->uid_policy[ids[i]])) + "\"}";
+        }
+        j += "]}";
+        printf("%s\n", j.c_str());
+    } else if (ids.empty()) {
+        printf("Every app is on the default policy (enforce). Nothing is exempt.\n");
+    } else {
+        printf("apps whose policy is not the default, user %d:\n", ctx.user);
+        for (uint32_t id : ids) {
+            const std::string* pkg = name_for(names, id);
+            printf("  %-8u %-9s %s\n", id, policy_name(ctl.p->uid_policy[id]),
+                   pkg ? pkg->c_str() : "");
+        }
+        printf("\n  %zu app%s differ from 'enforce'; every other app is filtered.\n",
+               ids.size(), ids.size() == 1 ? "" : "s");
+        if (!have_names)
+            printf("  Package names could not be listed from this shell, so only\n"
+                   "  appIds are shown. `cmd package list packages -U` is the source.\n");
+    }
+
+    nr_ctl_close(&ctl);
+    return NR_EXIT_OK;
+}
+
+// ---------------------------------------------------------------------------
+// import / export / rollback / deep / panic — the second wave of mutating verbs
+// ---------------------------------------------------------------------------
+
+struct FileStamp {
+    bool     present;
+    bool     conclusive;  /* false when we were refused rather than answered */
+    uint64_t size;
+    int64_t  mtime_ns;
+};
+
+/* stat() with the distinction that matters here: ENOENT is an ANSWER ("it is not
+ * there"), while EACCES is a refusal ("this shell cannot see"). Reporting the
+ * second as the first is how a CLI ends up telling a user their export failed
+ * when it is sitting on disk in a directory shell cannot traverse. */
+FileStamp stamp_of(const char* path) {
+    FileStamp s{false, false, 0, 0};
+    struct stat st;
+    if (stat(path, &st) == 0) {
+        s.present = true;
+        s.conclusive = true;
+        s.size = (uint64_t)st.st_size;
+        s.mtime_ns = (int64_t)st.st_mtim.tv_sec * 1000000000LL + (int64_t)st.st_mtim.tv_nsec;
+    } else {
+        s.conclusive = (errno == ENOENT);
+    }
+    return s;
+}
+
+bool read_generation(const char* path, uint64_t* out) {
+    NrIndexRO idx;
+    if (!nr_index_open_ro(path, &idx, nullptr)) return false;
+    *out = idx.ix.hdr->generation;
+    nr_index_close_ro(&idx);
+    return true;
+}
+
+/* previous.nrdx lives beside whatever index we were pointed at, so --index keeps
+ * working for a developer testing against a scratch directory. */
+std::string sibling_of(const std::string& path, const char* name) {
+    const size_t slash = path.find_last_of('/');
+    if (slash == std::string::npos) return std::string(name);
+    return path.substr(0, slash + 1) + name;
+}
+
+int cmd_export(Ctx& ctx) {
+    const std::string path = ctx.args.empty() ? NR_PATH_EXPORT_DEFAULT : ctx.args[0];
+    if (path.empty() || path[0] != '/') {
+        warn("export needs an absolute path (got '%s')", path.c_str());
+        warn("the app writes this file itself, so a relative path would resolve");
+        warn("against ITS working directory, not yours.");
+        return NR_EXIT_USAGE;
+    }
+
+    const FileStamp before = stamp_of(path.c_str());
+    std::string err;
+    const int rc = send_ctl(ctx, "export", {{"--es", NR_CTL_EXTRA_PATH, path}}, &err);
+    if (rc != NR_EXIT_OK) {
+        warn("export: %s", err.c_str());
+        if (ctx.json) print_ctl_error_json("export", err);
+        return rc;
+    }
+    if (ctx.dry_run) return NR_EXIT_OK;
+
+    /* An archive of a few thousand rules is written in well under a second, but
+     * the app may be cold-started for the broadcast. */
+    FileStamp after = before;
+    bool written = false;
+    for (int waited = 0; waited < 10000; waited += 100) {
+        after = stamp_of(path.c_str());
+        if (after.present && after.size > 0 &&
+            (!before.present || after.mtime_ns != before.mtime_ns ||
+             after.size != before.size)) {
+            written = true;
+            break;
+        }
+        usleep(100 * 1000);
+    }
+
+    if (ctx.json) {
+        std::string j = "{\"ok\":";
+        j += (written || !after.conclusive) ? "true" : "false";
+        j += ",\"verb\":\"export\",\"path\":\"";
+        nr_json_escape(path.data(), path.size(), &j);
+        j += "\",\"confirmed\":";
+        j += written ? "true" : "false";
+        j += ",\"bytes\":" + std::to_string(after.size) + "}";
+        printf("%s\n", j.c_str());
+        return (written || !after.conclusive) ? NR_EXIT_OK : NR_EXIT_FAIL;
+    }
+    if (written) {
+        printf("export: wrote %s (%s)\n", path.c_str(), human_bytes(after.size).c_str());
+        return NR_EXIT_OK;
+    }
+    if (!after.conclusive) {
+        /* priv/ is 0770 system:misc — from adb shell this is the NORMAL outcome
+         * and saying "failed" would be wrong. */
+        printf("export: sent. Cannot confirm from this shell — %s is not readable\n"
+               "  here. Check with  su -c 'ls -l %s'\n", path.c_str(), path.c_str());
+        return NR_EXIT_OK;
+    }
+    warn("export: the broadcast was delivered but nothing appeared at %s after 10 s.",
+         path.c_str());
+    warn("CtlReceiver returns no result code, so this is the only evidence there is.");
+    warn("Check:  adb logcat -s Nullroute   (an unrecognised verb logs there)");
+    return NR_EXIT_FAIL;
+}
+
+/*
+ * `import` cannot be confirmed and does not pretend to be.
+ *
+ * The receiver parses the file into priv/deny.txt and priv/allow.txt and then
+ * has to rebuild the index for any of it to reach the resolver, which takes
+ * minutes. There is no intermediate observable, so this reports "requested" for
+ * the same reason `update` does.
+ */
+int cmd_import(Ctx& ctx) {
+    if (ctx.args.empty()) {
+        warn("usage: nrctl import PATH   (a hosts, AdAway, ABP or bindhosts file)");
+        return NR_EXIT_USAGE;
+    }
+    const std::string path = ctx.args[0];
+    if (path[0] != '/') {
+        warn("import needs an absolute path (got '%s')", path.c_str());
+        return NR_EXIT_USAGE;
+    }
+
+    /* Only ENOENT is conclusive from here; a shell that cannot traverse the
+     * parent gets EACCES and must not be told the file is missing. */
+    if (access(path.c_str(), F_OK) != 0 && errno == ENOENT) {
+        warn("import: no such file: %s", path.c_str());
+        return NR_EXIT_UNAVAILABLE;
+    }
+
+    std::string err;
+    const int rc = send_ctl(ctx, "import", {{"--es", NR_CTL_EXTRA_PATH, path}}, &err);
+    if (rc != NR_EXIT_OK) {
+        warn("import: %s", err.c_str());
+        if (ctx.json) print_ctl_error_json("import", err);
+        return rc;
+    }
+    if (ctx.dry_run) return NR_EXIT_OK;
+
+    if (ctx.json) {
+        std::string j = "{\"ok\":true,\"verb\":\"import\",\"confirmed\":false,\"path\":\"";
+        nr_json_escape(path.data(), path.size(), &j);
+        j += "\"}";
+        printf("%s\n", j.c_str());
+        return NR_EXIT_OK;
+    }
+    printf("import: requested %s\n", path.c_str());
+    printf("  THE APP READS THIS FILE, NOT THIS SHELL. It must be readable by uid\n"
+           "  " NR_APP_PACKAGE " — /data/local/tmp is not (that is shell's own\n"
+           "  directory and apps cannot see into it). %s is.\n", NR_DIR_PRIV);
+    printf("  Parsing is quick; the rebuild that puts the rules in front of the\n"
+           "  resolver takes minutes. Watch it with  nrctl status  (the generation\n"
+           "  number rises) or the app's Update screen.\n");
+    return NR_EXIT_OK;
+}
+
+/*
+ * `rollback` is the one verb here with a clean proof: the generation that
+ * previous.nrdx carried must become the generation current.nrdx carries. That is
+ * observable from a plain adb shell, so it is checked rather than assumed.
+ */
+int cmd_rollback(Ctx& ctx) {
+    const std::string prev_path = sibling_of(ctx.index_path, "previous.nrdx");
+
+    uint64_t prev = 0;
+    if (!read_generation(prev_path.c_str(), &prev)) {
+        warn("rollback: no usable previous index at %s", prev_path.c_str());
+        warn("There is nothing to roll back to. A rollback is only possible after a");
+        warn("successful update has demoted the index it replaced.");
+        if (ctx.json)
+            print_ctl_error_json("rollback", "no usable previous index");
+        return NR_EXIT_UNAVAILABLE;
+    }
+    uint64_t cur = 0;
+    const bool have_cur = read_generation(ctx.index_path.c_str(), &cur);
+    if (have_cur && cur == prev) {
+        warn("rollback: current and previous are both generation %llu; nothing to do",
+             (unsigned long long)prev);
+        if (ctx.json)
+            print_ctl_error_json("rollback", "current and previous are the same generation");
+        return NR_EXIT_UNAVAILABLE;
+    }
+
+    std::string err;
+    const int rc = send_ctl(ctx, "rollback", {}, &err);
+    if (rc != NR_EXIT_OK) {
+        warn("rollback: %s", err.c_str());
+        if (ctx.json) print_ctl_error_json("rollback", err);
+        return rc;
+    }
+    if (ctx.dry_run) return NR_EXIT_OK;
+
+    bool confirmed = false, readable = false;
+    uint64_t seen = 0;
+    for (int waited = 0; waited < 5000; waited += 100) {
+        readable = read_generation(ctx.index_path.c_str(), &seen);
+        if (readable && seen == prev) { confirmed = true; break; }
+        usleep(100 * 1000);
+    }
+
+    if (ctx.json) {
+        printf("{\"ok\":%s,\"verb\":\"rollback\",\"confirmed\":%s,"
+               "\"wanted_generation\":%llu,\"generation\":%llu}\n",
+               (confirmed || !readable) ? "true" : "false",
+               confirmed ? "true" : "false",
+               (unsigned long long)prev, (unsigned long long)seen);
+        return (confirmed || !readable) ? NR_EXIT_OK : NR_EXIT_FAIL;
+    }
+    if (confirmed) {
+        printf("rollback: current index is now generation %llu\n",
+               (unsigned long long)prev);
+        printf("  The resolver picks this up on its next query; `nrctl status` shows\n"
+               "  mapped_generation catching up.\n");
+        return NR_EXIT_OK;
+    }
+    if (!readable) {
+        printf("rollback: sent. Cannot confirm from this shell — the index is not\n"
+               "  readable here. Re-check with  su -c 'nrctl status'\n");
+        return NR_EXIT_OK;
+    }
+    warn("rollback: the broadcast was delivered but the index is still generation %llu",
+         (unsigned long long)seen);
+    warn("after 5 s (wanted %llu). Check:  adb logcat -s Nullroute",
+         (unsigned long long)prev);
+    return NR_EXIT_FAIL;
+}
+
+/*
+ * Does anything answer Deep mode's liveness probe?
+ *
+ * 1 = answered with the expected address, 0 = did not answer. This is EVIDENCE
+ * AND NOT PROOF in both directions, and cmd_deep prints it as such: the tunnel
+ * answers this name from inside itself, so a process whose DNS does not traverse
+ * the VPN sees nothing whether Deep mode is up or not.
+ */
+int deep_probe_answers() {
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+
+    struct addrinfo* res = nullptr;
+    if (getaddrinfo(NR_PROBE_DEEP_NAME, nullptr, &hints, &res) != 0) return 0;
+
+    int matched = 0;
+    for (struct addrinfo* p = res; p != nullptr; p = p->ai_next) {
+        if (p->ai_family != AF_INET || p->ai_addr == nullptr) continue;
+        const struct sockaddr_in* sin =
+            (const struct sockaddr_in*)(const void*)p->ai_addr;
+        char buf[INET_ADDRSTRLEN];
+        if (inet_ntop(AF_INET, &sin->sin_addr, buf, sizeof(buf)) != nullptr &&
+            strcmp(buf, NR_PROBE_DEEP_ADDR) == 0) {
+            matched = 1;
+        }
+    }
+    freeaddrinfo(res);
+    return matched;
+}
+
+/* True when SOME tun interface exists. Deep mode's tunnel is one of these, and
+ * so is every other VPN on the device — which is the point: no tun at all is a
+ * sound negative, a tun present names nobody. */
+bool any_tun_interface() {
+    FILE* f = fopen("/proc/net/dev", "re");
+    if (!f) return false;
+    char line[512];
+    bool found = false;
+    while (fgets(line, sizeof(line), f) != nullptr) {
+        const char* p = line;
+        while (*p == ' ' || *p == '\t') ++p;
+        if (strncmp(p, "tun", 3) == 0) { found = true; break; }
+    }
+    fclose(f);
+    return found;
+}
+
+void deep_report_human(int probe, bool tun) {
+    printf("Deep mode\n");
+    kv("probe", "%s", probe ? "answered " NR_PROBE_DEEP_ADDR " — a tunnel is carrying this shell's DNS"
+                            : "silent");
+    kv("tun", "%s", tun ? "a tun interface exists (Deep mode, or any other VPN)"
+                        : "no tun interface exists, so no VPN is established at all");
+    printf("\n  Deep mode's on/off switch lives in the app's device-encrypted\n"
+           "  preferences, which no shell can read, so this verb reports evidence\n"
+           "  rather than state. A silent probe with a tun present is genuinely\n"
+           "  undetermined: a root or shell process's lookups may not traverse the\n"
+           "  VPN at all. Open the app's Deep mode screen for the authoritative\n"
+           "  answer.\n");
+}
+
+int cmd_deep(Ctx& ctx) {
+    /* Bare `deep` is a read verb: no broadcast, no privilege, no side effect. */
+    if (ctx.args.empty()) {
+        const int probe = deep_probe_answers();
+        const bool tun = any_tun_interface();
+        if (ctx.json) {
+            printf("{\"ok\":true,\"verb\":\"deep\",\"probe\":\"%s\",\"tun_present\":%s,"
+                   "\"confirmed\":false}\n",
+                   probe ? "answered" : "silent", tun ? "true" : "false");
+        } else {
+            deep_report_human(probe, tun);
+        }
+        return NR_EXIT_OK;
+    }
+
+    const std::string& a = ctx.args[0];
+    bool enable;
+    if (a == "on" || a == "1" || a == "true") {
+        enable = true;
+    } else if (a == "off" || a == "0" || a == "false") {
+        enable = false;
+    } else {
+        warn("usage: nrctl deep [on|off]");
+        return NR_EXIT_USAGE;
+    }
+
+    std::string err;
+    const int rc = send_ctl(ctx, "deep",
+                            {{"--ez", NR_CTL_EXTRA_ENABLE, enable ? "true" : "false"}}, &err);
+    if (rc != NR_EXIT_OK) {
+        warn("deep: %s", err.c_str());
+        if (ctx.json) print_ctl_error_json("deep", err);
+        return rc;
+    }
+    if (ctx.dry_run) return NR_EXIT_OK;
+
+    /* Turning it ON has to cross a VpnService.prepare() consent that may never
+     * have been granted — in which case the app cannot establish anything and
+     * nothing here will ever show a tunnel. Waiting a moment makes the probe
+     * meaningful for the common case without implying the wait is a guarantee. */
+    if (enable) usleep(2500 * 1000);
+    const int probe = deep_probe_answers();
+    const bool tun = any_tun_interface();
+
+    if (ctx.json) {
+        printf("{\"ok\":true,\"verb\":\"deep\",\"requested\":\"%s\",\"probe\":\"%s\","
+               "\"tun_present\":%s,\"confirmed\":false}\n",
+               enable ? "on" : "off", probe ? "answered" : "silent",
+               tun ? "true" : "false");
+        return NR_EXIT_OK;
+    }
+    printf("deep: %s requested. NOT CONFIRMED — see below.\n", enable ? "on" : "off");
+    if (enable && !probe)
+        printf("  Turning Deep mode on needs the user's VPN consent, which cannot be\n"
+               "  granted from a shell. If it has never been granted on this device,\n"
+               "  the app will ask the next time its Deep mode screen is opened.\n");
+    deep_report_human(probe, tun);
+    return NR_EXIT_OK;
+}
+
+/*
+ * panic — the documented way out.
+ *
+ * One command that clears every switch at once, for the case this product's
+ * failure mode actually looks like: DNS is broken, the user cannot load
+ * anything, and the app is the last thing they can be asked to navigate. It is
+ * therefore deliberately NOT just a broadcast:
+ *
+ *   1. the CTL broadcast, which is what clears mode AND Deep mode AND any
+ *      pending update inside the app;
+ *   2. `persist.sys.nullroute.mode=off`, which is an INDEPENDENT path to the
+ *      same place — init has a property trigger on it that runs `nrctl syncprop`
+ *      as system, so mode reaches control.bin even if the app never runs;
+ *   3. the confirmation read of control.bin.
+ *
+ * What it cannot do from here is drop a live Deep-mode tunnel: that lives in the
+ * app's process and only the app can tear it down. `--stop-app` is the escape
+ * for that, and it is opt-in because force-stopping is a bigger hammer than most
+ * of the situations that bring someone to this verb.
+ *
+ * The kill switch is deliberately NOT set here. It disables filtering device-wide
+ * and needs a reboot, which is a heavier and less reversible thing than "switch
+ * everything off"; it is printed as the next step instead.
+ */
+int cmd_panic(Ctx& ctx) {
+    bool stop_app = false;
+    for (const std::string& a : ctx.args) {
+        if (a == "--stop-app") {
+            stop_app = true;
+        } else {
+            warn("panic: unknown option '%s'", a.c_str());
+            warn("usage: nrctl panic [--stop-app]");
+            return NR_EXIT_USAGE;
+        }
+    }
+
+    std::string err;
+    const int rc = send_ctl(ctx, "panic", {}, &err);
+    const bool broadcast_ok = (rc == NR_EXIT_OK);
+    if (!broadcast_ok) warn("panic: broadcast failed: %s", err.c_str());
+    if (ctx.dry_run) return NR_EXIT_OK;
+
+    /* Independent of the app being alive, and of it having understood the verb. */
+    const bool prop_ok = nr_prop_set(NR_PROP_MODE, "off");
+
+    uint8_t seen = 0;
+    bool readable = false, confirmed = false;
+    for (int waited = 0; waited < 3000; waited += 100) {
+        readable = read_mode(ctx, &seen);
+        if (readable && seen == NR_MODE_OFF) { confirmed = true; break; }
+        usleep(100 * 1000);
+    }
+
+    bool stopped = false;
+    if (stop_app) {
+        /* AFTER the confirmation window: force-stopping first would kill the app
+         * before it could act on the broadcast we just sent it. */
+        std::vector<std::string> argv;
+        if (access("/system/bin/cmd", X_OK) == 0) {
+            argv = {"/system/bin/cmd", "activity", "force-stop", NR_APP_PACKAGE};
+        } else if (access("/system/bin/am", X_OK) == 0) {
+            argv = {"/system/bin/am", "force-stop", NR_APP_PACKAGE};
+        }
+        if (!argv.empty()) {
+            std::string out;
+            stopped = run_capture(argv, &out) == 0;
+            if (!stopped && !out.empty()) fputs(out.c_str(), stderr);
+        }
+    }
+
+    if (ctx.json) {
+        printf("{\"ok\":%s,\"verb\":\"panic\",\"broadcast\":%s,\"mode_property\":%s,"
+               "\"confirmed\":%s,\"mode\":\"%s\",\"deep_confirmed\":false,"
+               "\"app_stopped\":%s}\n",
+               (confirmed || !readable) ? "true" : "false",
+               broadcast_ok ? "true" : "false", prop_ok ? "true" : "false",
+               confirmed ? "true" : "false",
+               readable ? nr_mode_name(seen) : "unreadable",
+               stopped ? "true" : "false");
+        return (confirmed || !readable) ? NR_EXIT_OK : NR_EXIT_FAIL;
+    }
+
+    printf("panic:\n");
+    kv("broadcast", "%s", broadcast_ok ? "delivered" : "FAILED");
+    kv("mode prop", "%s", prop_ok ? NR_PROP_MODE "=off"
+                                  : "could not set " NR_PROP_MODE " (needs root/system)");
+    if (confirmed)      kv("filtering", "off — read back from control.bin");
+    else if (!readable) kv("filtering", "sent; control.bin is not readable from this shell");
+    else                kv("filtering", "STILL %s after 3 s", nr_mode_name(seen));
+    kv("deep mode", "%s", stopped
+        ? "the app was force-stopped, which drops any Deep-mode tunnel with it"
+        : "requested off; NOT confirmable from a shell");
+
+    printf("\n  Still broken? In order of severity:\n"
+           "    nrctl panic --stop-app        force-stops the app, dropping the VPN\n"
+           "    setprop %s 1 && reboot\n"
+           "                                  the kill switch: filtering off device-wide\n",
+           NR_PROP_KILL);
+    if (!confirmed && readable)
+        warn("CtlReceiver returns no result code, so the read-back above is the only "
+             "evidence there is. Check:  adb logcat -s Nullroute");
+    return (confirmed || !readable) ? NR_EXIT_OK : NR_EXIT_FAIL;
+}
+
+// ---------------------------------------------------------------------------
 // help + dispatch + selftest
 // ---------------------------------------------------------------------------
 
@@ -956,11 +1635,26 @@ const Verb kVerbs[] = {
      cmd_verify, false},
     {"log", "[--max N]", "drain the resolver's query ring (Phase 3 writer)",
      cmd_log, false},
+    {"apps", "[PKG|UID]", "per-app policy: which apps are exempt or strict",
+     cmd_apps, false},
     {"pause", "", "stop filtering until resumed", cmd_pause, true},
     {"resume", "", "start filtering again", cmd_resume, true},
     {"off", "", "disable filtering entirely (survives until re-enabled)", cmd_off, true},
     {"update", "", "ask the app to refresh its lists and rebuild the index",
      cmd_update, true},
+    {"import", "PATH", "import a hosts / AdAway / ABP / bindhosts file",
+     cmd_import, true},
+    {"export", "[PATH]", "write a settings + rules archive the app can restore",
+     cmd_export, true},
+    {"rollback", "", "put the previous index back and prove it landed",
+     cmd_rollback, true},
+    /* Marked mutating because `deep on|off` is; bare `deep` is a read and needs
+     * no privilege, which the help text below spells out rather than leaving to
+     * the annotation. */
+    {"deep", "[on|off]", "Deep mode: Chrome and apps that run their own DNS",
+     cmd_deep, true},
+    {"panic", "[--stop-app]", "clear every switch at once — the last resort",
+     cmd_panic, true},
     {"build", "--out F --gen N SOURCE...", "compile lists into an index (development)",
      cmd_build, false},
     {"syncprop", "", "mirror " NR_PROP_MODE " into control.bin (called by init)",
@@ -1002,6 +1696,24 @@ int cmd_help(Ctx& ctx) {
         "'succeeded' is not evidence that anything happened.\n"
         "syncprop is the one mutating verb that writes control.bin itself; init runs it\n"
         "from a property trigger and it needs the system uid.\n"
+        "\n"
+        "WHAT EACH OF THE SECOND-WAVE VERBS CAN AND CANNOT PROVE\n"
+        "  apps      a read. The per-app policy table is inside control.bin, which shell\n"
+        "            can map read-only; package names come from `cmd package` and are\n"
+        "            cosmetic, so bare appIds are shown when that is unavailable.\n"
+        "  rollback  proved: previous.nrdx's generation must become current's.\n"
+        "  export    proved when this shell can stat the path; priv/ is 0770 system:misc,\n"
+        "            so from adb shell the honest answer is usually 'sent, cannot see'.\n"
+        "  import    NOT proved. The file is parsed quickly and the rebuild that puts it\n"
+        "            in front of the resolver takes minutes. Note the app reads the path,\n"
+        "            not this shell: /data/local/tmp is unreadable to it.\n"
+        "  deep      NOT proved. Deep mode's switch is in the app's device-encrypted\n"
+        "            preferences and no shell can read it; bare `deep` reports the probe\n"
+        "            and whether a tun exists, which is evidence, not state.\n"
+        "  panic     proved for mode. It sends the broadcast AND sets\n"
+        "            " NR_PROP_MODE "=off, which reaches control.bin\n"
+        "            through init's syncprop trigger even if the app never runs. It\n"
+        "            cannot drop a live Deep-mode tunnel — that needs --stop-app.\n"
         "\n"
         "exit codes: 0 ok, 1 failed, 2 usage, 3 unavailable\n"
         "\n"
@@ -1187,6 +1899,86 @@ int cmd_selftest(Ctx& ctx) {
     failures += bad_mut;
     if (!bad_mut) pass("pause/resume/off/update marshal the CtlReceiver intent");
 
+    /*
+     * The same assertion for the second wave, which needs its own table because
+     * these verbs take arguments and two of them carry a SECOND extra. `path`
+     * and `enable` are new keys on both sides of the contract, and a new key is
+     * exactly where the "advertised verb that does nothing" bug comes back: the
+     * receiver reads getStringExtra("path"), so `--es file` would marshal, send,
+     * be delivered, and import nothing. Spelled out literally, for the reason the
+     * block above gives.
+     */
+    struct Mut2 {
+        const char*              verb;
+        std::vector<std::string> args;
+        std::string              must_contain;
+    };
+    std::vector<Mut2> kMut2 = {
+        {"export", {"/data/misc/nullroute/priv/selftest.zip"},
+         "--es path /data/misc/nullroute/priv/selftest.zip"},
+        /* `import` refuses a path that is definitely absent, so it is pointed at
+         * the scratch source file this test already wrote. */
+        {"import", {src}, std::string("--es path ") + src},
+        {"deep", {"on"}, "--ez enable true"},
+        {"deep", {"off"}, "--ez enable false"},
+        {"panic", {}, "--es verb panic"},
+    };
+
+    /* rollback reads previous.nrdx BEFORE it will send anything — correctly, it
+     * refuses to ask for a rollback that cannot happen — so the precondition has
+     * to exist for the marshalling to be reachable at all. A second index at a
+     * different generation is the whole precondition. */
+    char prevp[PATH_MAX];
+    snprintf(prevp, sizeof(prevp), "%s/previous.nrdx", tmpdir);
+    bool made_prev = false;
+    if (access(prevp, F_OK) != 0) {
+        Ctx b;
+        b.dry_run = true;
+        b.args = {"--out", prevp, "--gen", "2", src};
+        made_prev = find_verb("build")->fn(b) == NR_EXIT_OK;
+    }
+    if (made_prev) {
+        kMut2.push_back({"rollback", {}, "--es verb rollback"});
+    } else {
+        /* Printed, not silently skipped: a gate that quietly drops a case is a
+         * gate that reports green for coverage it does not have. */
+        printf("  note  rollback marshalling not asserted (%s is in the way)\n", prevp);
+    }
+
+    int bad_mut2 = 0;
+    for (const Mut2& m : kMut2) {
+        const Verb* v = find_verb(m.verb);
+        if (!v) { fail("a second-wave verb is missing from the table"); continue; }
+        Ctx dry;
+        dry.dry_run    = true;
+        dry.json       = true;
+        dry.index_path = idxp;
+        dry.args       = m.args;
+        if (v->fn(dry) != NR_EXIT_OK ||
+            dry.last_command.find(NR_CTL_COMPONENT) == std::string::npos ||
+            dry.last_command.find(NR_CTL_ACTION) == std::string::npos ||
+            dry.last_command.find(m.must_contain) == std::string::npos) {
+            printf("  FAIL  %s did not marshal a usable broadcast\n"
+                   "        wanted: %s\n        sent:   %s\n",
+                   m.verb, m.must_contain.c_str(), dry.last_command.c_str());
+            ++bad_mut2;
+        }
+    }
+    failures += bad_mut2;
+    if (!bad_mut2) pass("import/export/rollback/deep/panic marshal path and enable");
+
+    /* `apps` is a read verb with no fixture: it must survive a missing control
+     * page by reporting it, not by crashing or by inventing an empty table. */
+    {
+        Ctx a;
+        a.json = true;
+        a.ctl_path = "/nonexistent/nullroute/control.bin";
+        const int arc = find_verb("apps")->fn(a);
+        if (arc == NR_EXIT_UNAVAILABLE) pass("apps reports a missing control page");
+        else fail("apps did not report a missing control page as unavailable");
+    }
+
+    if (made_prev) unlink(prevp);
     unlink(src);
     unlink(idxp);
 
