@@ -413,14 +413,24 @@ fi
 head1 "6. addon.d must not restore a stale hosts file"
 ###############################################################################
 #
-# 50-lineage.sh's survival list is applied by the OTA, after the new image is
+# The addon.d survival list is applied by the OTA, after the new image is
 # written. If etc/hosts is still in it, the first OTA silently reinstates the
 # pre-OTA hosts file over the freshly built one — and it does so for the addon.d
 # generation, not for this build, so every check you run today passes.
+#
+# BestROM: the file is 50-voltage.sh, not 50-lineage.sh, and nothing in the tree
+# currently installs it, so no /system/addon.d is produced. Both names are
+# checked so this stays honest on either tree; the source path missing entirely
+# is itself reported, because a check that quietly matches nothing reads as a
+# pass and that is the failure class this whole script exists to prevent.
 
-for f in vendor/lineage/prebuilt/common/bin/50-lineage.sh \
+_nr_addond_seen=0
+for f in vendor/voltage/prebuilt/common/bin/50-voltage.sh \
+         vendor/lineage/prebuilt/common/bin/50-lineage.sh \
+         "$OUT/system/addon.d/50-voltage.sh" \
          "$OUT/system/addon.d/50-lineage.sh"; do
     if [ -f "$f" ]; then
+        _nr_addond_seen=1
         if grep -q 'etc/hosts' "$f"; then
             fail "$f still lists etc/hosts in the addon.d survival list —"
             fail "  the first OTA will restore a stale hosts file over L0"
@@ -429,6 +439,10 @@ for f in vendor/lineage/prebuilt/common/bin/50-lineage.sh \
         fi
     fi
 done
+if [ "$_nr_addond_seen" = 0 ]; then
+    warn "no addon.d survival script found in the tree or the image"
+    warn "  nothing can restore a stale hosts file, but check the paths above"
+fi
 
 ###############################################################################
 head1 "Result"
