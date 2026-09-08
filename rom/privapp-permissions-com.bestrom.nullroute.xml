@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Nullroute — privileged permission allowlist.
+    Installs to /system_ext/etc/permissions/privapp-permissions-com.bestrom.nullroute.xml
+
+    ⚠ READ BEFORE EDITING THE MANIFEST.
+
+    User builds set ro.control_privapp_permissions=enforce
+    (frameworks/base .../RoSystemProperties.java). Under enforce, a privileged
+    app that requests a signature|privileged permission which is NOT listed here
+    makes PackageManagerService throw during scanning, and the device ABORTS AT
+    BOOT. It is not a warning and it is not recoverable from userspace.
+
+    Consequences:
+      * Over-listing is inert. A permission listed here but not requested in the
+        manifest is simply never granted.
+      * Under-listing bricks the device.
+      * This file lives in the signed image, so it CANNOT be shipped out of band.
+        An APK update pushed to /data/app can add runtime and pure-signature
+        permissions freely, but it can never add a signature|privileged one that
+        is missing here.
+
+    => Enumerate everything the app will ever plausibly need NOW, including the
+       Phase 4 and Phase 5 surface. That is why entries below are annotated with
+       the phase that first needs them rather than being trimmed to Phase 1.
+
+    DELIBERATELY ABSENT, and they must stay absent:
+
+      android.permission.NETWORK_STACK
+      android.permission.MAINLINE_NETWORK_STACK
+        These guard IDnsResolver.setResolverConfiguration()
+        (DnsResolverService.cpp, ENFORCE_NETWORK_STACK_PERMISSIONS). Nullroute
+        does not use the resolver's customizedTable at all — that table is
+        exact-match only, per-netId, cleared on every setResolverConfiguration(),
+        and AOSP's own doc comment says it "is not an effective domain blocking
+        mechanism". Holding these permissions would let a bug in this app
+        reconfigure the whole device's DNS. The block decision lives in the
+        resolver's own address space instead. Do not add them.
+
+      android.permission.WRITE_SECURE_SETTINGS is present, but it is scoped by
+        code review to ALWAYS_ON_VPN_* for Deep mode. It must NEVER be used to
+        write Settings.Global.PRIVATE_DNS_MODE — silently changing the user's
+        Private DNS setting is exactly the kind of behaviour this project
+        refuses (see the refused vpn-first patches in SPEC.md §1).
+-->
+<permissions>
+    <privapp-permissions package="com.bestrom.nullroute">
+
+        <!-- Phase 2: attribute a blocked lookup to the app the user was actually
+             looking at, so the breakage notifier can say "Maps just failed a
+             lookup for ..." instead of naming a uid. -->
+        <permission name="android.permission.PACKAGE_USAGE_STATS"/>
+        <permission name="android.permission.REAL_GET_TASKS"/>
+
+        <!-- Phase 2: "Allow + retry" also offers "Force stop app". Un-blocking is
+             instantaneous at the resolver (blocked answers never enter res_cache)
+             but in-process caches — OkHttp, Chromium, the JVM negative TTL — are
+             not ours to flush, and we cannot reach IDnsResolver.flushNetworkCache
+             because dnsresolver_service is neverallow-guarded for us. A force
+             stop is the only honest way to make "Allow" take effect now. -->
+        <permission name="android.permission.FORCE_STOP_PACKAGES"/>
+
+        <!-- Phase 4 (Deep mode): ALWAYS_ON_VPN_APP / ALWAYS_ON_VPN_LOCKDOWN only.
+             See the warning in the header. -->
+        <permission name="android.permission.WRITE_SECURE_SETTINGS"/>
+
+        <!-- Phase 5: per-user policy and work-profile coverage. The index is
+             system-wide but uid_policy is keyed on appId, so enumerating the
+             other users' packages needs these. -->
+        <permission name="android.permission.INTERACT_ACROSS_USERS"/>
+        <permission name="android.permission.INTERACT_ACROSS_USERS_FULL"/>
+        <permission name="android.permission.MANAGE_USERS"/>
+
+        <!-- Phase 3: the diagnostics bundle. It captures getprop
+             sys.nullroute.filter, the control-page counters, ring drops and the
+             dual .invalid probe result — the three independent health signals
+             (F8) — so a bug report distinguishes "hook never ran" from
+             "hook ran and allowed". -->
+        <permission name="android.permission.DUMP"/>
+        <permission name="android.permission.READ_LOGS"/>
+        <permission name="android.permission.BATTERY_STATS"/>
+
+        <!-- Phase 2: per-app policy UI reads and writes app-op state for the
+             apps it exempts. -->
+        <permission name="android.permission.GET_APP_OPS_STATS"/>
+        <permission name="android.permission.UPDATE_APP_OPS_STATS"/>
+
+        <!-- Phase 2: the breakage notifier must be able to open the "this app
+             just lost a lookup" sheet from a background job. -->
+        <permission name="android.permission.START_ACTIVITIES_FROM_BACKGROUND"/>
+
+        <!-- Phase 4: Deep mode must not fight the data saver / metered policy. -->
+        <permission name="android.permission.OBSERVE_NETWORK_POLICY"/>
+
+        <!-- Phase 1, and the only two entries here that the SHIPPING manifest
+             already requests. They are listed because the cost of being wrong is
+             asymmetric, not because AOSP is known to mark them privileged:
+             READ_DEVICE_CONFIG is signature|preinstalled and WRITE_DEVICE_CONFIG
+             is signature on the branches we have read, so on those branches these
+             two lines are inert. If either ever carries |privileged — an upstream
+             change we would find out about when a device stops booting — the
+             allowlist is frozen in the signed image and cannot be fixed by
+             pushing an APK. Over-listing is free; under-listing bricks. -->
+        <permission name="android.permission.READ_DEVICE_CONFIG"/>
+        <permission name="android.permission.WRITE_DEVICE_CONFIG"/>
+
+    </privapp-permissions>
+</permissions>

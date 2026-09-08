@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Nullroute — the DAC half of the /data/misc/nullroute access story.
+    Installs to /system_ext/etc/permissions/nullroute-gid.xml
+
+    THE PROBLEM
+    ===========
+    The four state dirs /data/misc/nullroute/{index,ctl,log,priv} are 0770
+    system:misc. Nothing that is not uid system, uid root or a member of gid misc
+    (AID_MISC = 9998) can open, list or create anything inside them.
+
+    (Be precise about the parent, because the mode is easy to misread: /data/misc
+    is 01771 system:misc — owner rwx, group rwx, OTHER x-only — so any process can
+    *traverse* /data/misc and /data/misc/nullroute. Traversal is not the gate. The
+    0770 on the four leaf directories is. Do not "fix" the parent's mode expecting
+    it to change anything, and do not relax the leaves expecting the parent to
+    still protect them.)
+
+    SELinux is only half the gate. A process can hold
+    `allow nullroute_app nullroute_ctl_file:file { ... map ... }` and still get
+    EACCES from ordinary Unix permissions. Both halves have to line up.
+
+    THE REJECTED FIX
+    ================
+    android:sharedUserId="android.uid.system" would give the app uid 1000 and
+    solve this in one line. It is refused:
+      * deprecated and permanently un-migratable once shipped;
+      * it collapses the app into the system UID's sandbox, so a bug in the
+        blocklist parser — which chews on hundreds of thousands of lines of
+        attacker-influenced text from the internet — becomes a system-UID
+        compromise;
+      * it interferes with the /data/app sideload-update path we rely on for
+        out-of-band APK updates.
+    The sibling in-tree app packages/apps/Freezer correctly does not use it.
+
+    THE FIX
+    =======
+    SystemConfig parses <permission> elements with <group gid="..."/> children
+    from every etc/permissions directory it reads with the ALLOW_PERMISSIONS
+    flag, and /system_ext/etc/permissions is read with that flag. PackageManager
+    then adds the mapped gid to the supplementary group list of any package
+    holding the permission. This is the same machinery that maps
+    android.permission.INTERNET -> gid inet; we are not inventing a mechanism.
+
+    The app must ALSO declare the permission itself, with
+    android:protectionLevel="signature", and <uses-permission> it. The signature
+    check is trivially satisfied — the app is its own signer — and declaring it
+    in the manifest means the permission exists even if this file is somehow not
+    read, which turns a silent gid failure into a loud missing-permission one.
+
+    VERIFY ON DEVICE (Spike 2, SPEC.md §10.6):
+        adb shell cat /proc/$(adb shell pidof com.bestrom.nullroute)/status | grep Groups
+    must list 9998.
+
+    FALLBACK IF THE MAPPING DOES NOT TAKE
+    =====================================
+    Relax the four state dirs from 0770 to 0775 in rom/init.nullroute.rc and let
+    SELinux be the sole gate. Note what that actually costs: /data/misc is
+    world-traversable (01771 grants "other" execute), so the leaf mode is the only
+    DAC left and 0775 removes it entirely. It is safe on a user build because MAC is
+    enforcing and no app domain is granted these types — but it is a fallback,
+    not the design, and it is strictly one layer thinner.
+
+    THE SECOND ENTRY — the nrctl control channel
+    ============================================
+    `nrctl pause|resume|update` does not write anything itself; it broadcasts
+    com.bestrom.nullroute.action.CTL to the app's CtlReceiver, which is guarded by
+    android:permission="com.bestrom.nullroute.permission.CTL".
+
+    ActivityManager.checkComponentPermission() short-circuits to GRANTED for
+    appId 0 (root) and appId 1000 (system) — so `su` and system_server pass that
+    guard for free. **uid 2000 (shell) does not.** com.android.shell cannot
+    <uses-permission> a permission that did not exist when it was built, so
+    without the assignment below the broadcast is simply not delivered: `am`
+    prints "Broadcast completed: result=0", nrctl reports success, and nothing
+    happens. A mutating CLI that silently no-ops is exactly the v8.2 failure this
+    project's CLI design is built to make impossible, so the fix belongs here and
+    not in a doc comment.
+
+    <assign-permission> is parsed from any etc/permissions directory read with
+    ALLOW_PERMISSIONS, which /system_ext/etc/permissions is, and it is applied by
+    PermissionManagerService.checkUidPermission() for uids that are not packages.
+
+    VERIFY ON DEVICE:
+        adb shell nrctl pause 1 && adb shell nrctl status   # must read PAUSED
+-->
+<permissions>
+    <permission name="com.bestrom.nullroute.permission.STATE">
+        <!-- AID_MISC = 9998, the group that owns /data/misc. -->
+        <group gid="misc" />
+    </permission>
+
+    <assign-permission name="com.bestrom.nullroute.permission.CTL" uid="shell" />
+</permissions>

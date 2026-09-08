@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Nullroute — power and data policy exemptions.
+    Installs to /system_ext/etc/sysconfig/sysconfig-nullroute.xml
+
+    This file is the single largest reason to be an in-tree system_ext app rather
+    than a sideloaded APK. Every off-store blocker spends its life fighting Doze,
+    app standby buckets and the data saver, and loses quietly: the blocklist goes
+    stale, the user never finds out, and the product silently degrades into
+    whatever was current the week they installed it.
+
+    None of these exemptions put the app in the DNS path. The path is netd + an
+    mmap'd file; the app is a compiler and a UI that runs a few times a week.
+
+    allow-in-power-save
+        The refresh job (JobScheduler, ~daily) and the HealthWatchdog need to run
+        while the device is idle. Without this the refresh lands only when the
+        user happens to unlock during a maintenance window, which on a lightly
+        used device can be never. The watchdog also has to clear
+        persist.sys.nullroute.fail_streak after 120 s of healthy uptime — the
+        boot-loop breaker (F7) counts a boot as bad if that never happens, so a
+        Doze-suppressed watchdog would eventually quarantine a perfectly good
+        index on the third boot.
+
+    allow-in-data-usage-save
+        Blocklist refreshes are conditional and small (Range version probe, then
+        If-None-Match / If-Modified-Since, gzip or br). They must still be able
+        to complete under Data Saver, because the alternative is an out-of-date
+        malware list on exactly the connection the user was worried about.
+
+    hidden-api-whitelisted-app
+        The app is built against system_current, not platform_apis, so it uses
+        no @hide API on the normal path. This entry exists so that the
+        diagnostics bundle and the Deep-mode tunnel plumbing can reach the
+        handful of greylisted members they need without the app having to be
+        rebuilt against platform_apis — which would break the Gradle parity
+        build that doubles as the stock-Android Deep-mode variant.
+
+    NOT PRESENT, on purpose:
+      * <allow-unthrottled-location> / any location exemption — Nullroute never
+        touches location.
+      * <allow-ignore-location-settings> — same.
+      * <bugreport-whitelisted> — the diagnostics bundle is explicit and
+        user-initiated; it does not need to ride along in every bug report.
+-->
+<config>
+    <allow-in-power-save package="com.bestrom.nullroute" />
+    <allow-in-data-usage-save package="com.bestrom.nullroute" />
+    <hidden-api-whitelisted-app package="com.bestrom.nullroute" />
+</config>

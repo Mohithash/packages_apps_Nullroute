@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Nullroute — runtime permissions pre-granted on first boot.
+    Installs to /system_ext/etc/default-permissions/default-permissions-nullroute.xml
+
+    Parsed by DefaultPermissionGrantPolicy. The <exception> element normally
+    carries a sha256-cert-digest; it is omitted here because the package is
+    platform-signed and preinstalled on the read-only system_ext partition, so
+    the digest would only restate the image's own signing key.
+
+    POST_NOTIFICATIONS is the only entry, and it is the one that matters most:
+    two of the three health signals are user-visible only as notifications.
+
+      * The "Not filtering" state (both .invalid probes fail) raises a
+        persistent notification. If the user never granted notifications, a dead
+        resolver hook looks exactly like a working one — which is the single
+        failure mode this whole project is built to make loud (SPEC.md §10.2).
+      * The breakage notifier ("Maps just failed a lookup for maps.gstatic.com —
+        Allow?") is the recovery path for a false positive. Without it the user's
+        only signal is an app that mysteriously does not work.
+
+    fixed="false" so the user keeps full control and can revoke it in Settings
+    like any other app. Pre-granting is about not losing the signal on a fresh
+    flash, not about denying the user a choice.
+
+    Nothing else is pre-granted. In particular there is no location, contacts,
+    storage or phone-state grant here, because Nullroute requests none of them.
+-->
+<exceptions>
+    <exception package="com.bestrom.nullroute">
+        <permission name="android.permission.POST_NOTIFICATIONS" fixed="false"/>
+    </exception>
+</exceptions>

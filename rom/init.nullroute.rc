@@ -1,0 +1,109 @@
+# Nullroute — boot-time state root and seeder.
+#
+# Installs to /system_ext/etc/init/init.nullroute.rc. init parses that directory
+# unconditionally, so this needs no device-tree change and no vendor_init edit;
+# it rides along with the system_ext partition and disappears cleanly if the
+# feature is dropped from PRODUCT_PACKAGES.
+#
+# WHY post-fs-data AND NOT LATER
+# ------------------------------
+# post-fs-data is the first trigger at which /data is mounted, and it is before
+# first unlock. Every piece of Nullroute state lives in DE storage
+# (/data/misc/nullroute) precisely so that filtering is live for the very first
+# DNS query of the boot with no ENOKEY window and no boot race. The query log is
+# the one thing that lives in CE storage instead — a seized-but-locked device
+# should not hand over the user's DNS history.
+#
+# WHY netd MUST NEVER CREATE THESE FILES
+# --------------------------------------
+# netd runs as root. If it were allowed to create control.bin or ring.bin it
+# would create them root-owned, and the app — which is a normal uid with gid misc
+# and no root — could never write the control page again. Pause and every
+# per-app policy would be silently dead, which is defect F1 in a different
+# costume. So: the seeder pre-creates both files at the right size, mode and
+# ownership, and the resolver only ever open()s files that already exist.
+
+on post-fs-data
+    # 0771 on the root: traversable, not listable. /data/misc above it is 01771,
+    # i.e. "other" already has execute, so the parent is NOT the gate — the 0770
+    # on the four leaf dirs is. Membership of gid misc is what opens them, and
+    # that is exactly what rom/nullroute-gid.xml buys the app.
+    #
+    # These dirs are labelled by rom/sepolicy/file_contexts.frag at creation:
+    #   index -> nullroute_index_file   (app rw, netd ro + map)
+    #   ctl   -> nullroute_ctl_file     (app rw, netd rw + map)
+    #   log   -> nullroute_log_file     (netd rw, app ro + map)
+    #   priv  -> nullroute_data_file    (app rw, netd nothing at all)
+    # The parent /data/misc/nullroute is deliberately left at the inherited
+    # system_data_file label: netd needs to traverse it, and giving it a
+    # nullroute_* label would mean granting netd a permission on a type that is
+    # supposed to be app-private.
+    mkdir /data/misc/nullroute 0771 system misc
+    mkdir /data/misc/nullroute/index 0770 system misc
+    mkdir /data/misc/nullroute/ctl 0770 system misc
+    mkdir /data/misc/nullroute/log 0770 system misc
+    mkdir /data/misc/nullroute/priv 0770 system misc
+
+    # An OTA that introduces or renames these types finds the directories
+    # already present from the previous boot and therefore does NOT relabel them
+    # — mkdir only labels what it creates. Without this line the first boot
+    # after such an OTA leaves netd unable to map an index that looks perfectly
+    # fine from userspace. Cheap insurance for the exact failure class that is
+    # hardest to diagnose.
+    restorecon_recursive /data/misc/nullroute
+
+    start nullroute_seed
+
+# The seeder verifies current.nrdx's sha256, compiles the baked baseline on
+# first boot after a flash or OTA, pre-creates control.bin and ring.bin, and
+# arms the boot-loop breaker (persist.sys.nullroute.fail_streak). The app clears
+# fail_streak after 120 s of healthy uptime; at 3 the seeder quarantines
+# current.nrdx and sets kill=1, so the third consecutive bad boot comes up clean.
+#
+# `start`, not `exec_start`: boot is never gated on this. The seeder costs
+# 200-400 ms and only on the first boot after a flash or OTA, and the resolver
+# tolerates a missing index with a lazy-open backoff and a fail-OPEN verdict.
+# `class core` starts before `class main` (which is where netd lives), so in
+# practice the index is published before the first query anyway.
+#
+# `group misc system` — misc FIRST, and that ordering is load-bearing. init sets
+# the first group as the process's primary gid, and the primary gid is what the
+# kernel stamps on files the process creates. With `system misc` the seeder
+# would create control.bin as system:system and the app (gid misc, uid != system)
+# could not write it. With `misc system` it lands as system:misc and the app can.
+service nullroute_seed /system_ext/bin/nullroute_seed
+    class core
+    user system
+    group misc system
+    oneshot
+    seclabel u:r:nullroute_seed:s0
+
+# persist.sys.nullroute.mode is the single source of truth for pause/enforce on
+# disk; NrControl::mode is derived from it. Two authorities can never disagree
+# about a boolean, so the property wins and this trigger pushes it into the
+# control page even when the app is not running (after `setprop` from a shell,
+# or after `nrctl mode paused` on a device where the app has been force-stopped).
+#
+# It runs in the SEEDER's domain via an explicit seclabel rather than getting a
+# domain of its own: the work is one byte written into control.bin, and
+# nullroute_seed already holds exactly that grant. `disabled` keeps it out of
+# class core's automatic startup — it only ever runs from the triggers below.
+service nullroute_syncprop /system_ext/bin/nrctl syncprop
+    class core
+    user system
+    group misc system
+    oneshot
+    disabled
+    seclabel u:r:nullroute_seed:s0
+
+on property:persist.sys.nullroute.mode=*
+    start nullroute_syncprop
+
+# The app-independent kill switch. Setting persist.sys.nullroute.kill=1 makes
+# the resolver return PASS for every name on its next query without unmapping
+# anything, and makes H4 stop skipping the L0 hosts scan. It is the recovery
+# path when the app cannot be launched at all — a locked-out device, a bad
+# index that survived the canary, a user who needs their banking app to work
+# right now. It is honoured with no app process involved.
+on property:persist.sys.nullroute.kill=*
+    start nullroute_syncprop

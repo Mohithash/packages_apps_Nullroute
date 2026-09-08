@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Nullroute — which user types get the app preinstalled.
+    Installs to /system_ext/etc/sysconfig/preinstalled-packages-platform-nullroute.xml
+
+    The filter itself is user-agnostic: it lives inside netd and applies to every
+    lookup on the device regardless of which user made it. This file governs the
+    *UI*, not the enforcement.
+
+    SYSTEM    — listed as well as FULL, and it is not redundant. On peridot user 0
+                is android.os.usertype.full.SYSTEM, which carries both flags, so
+                FULL alone would do. On a headless-system-user device it does not:
+                user 0 is SYSTEM-only, and with FULL alone the app would be absent
+                from the very user that owns the device. One line, no cost.
+    FULL      — the owner and any secondary users get the app and can configure it.
+    PROFILE   — work profiles get it too. A managed profile is exactly where a
+                user most wants to see what is being resolved, and the resolver
+                hook covers those lookups whether or not the app is installed
+                there; installing it means the query log and the per-app policy
+                screen are reachable from inside the profile.
+    CLONE     — excluded. A clone profile shares the parent's app set; a second
+                copy of a system-configuration app there is confusing and its
+                writes would race the parent's over the same control page.
+    PRIVATE   — excluded, deliberately. A private space is meant to be invisible;
+                installing a system-wide network-configuration app inside it adds
+                an attack surface and no capability, because the filter already
+                covers those lookups from netd.
+
+    Note this is preinstall placement only. Removing the app from a user does not
+    disable filtering for that user — the index and control page are system-wide
+    DE state. That asymmetry is intentional and is stated in the About screen.
+-->
+<config>
+    <install-in-user-type package="com.bestrom.nullroute">
+        <install-in user-type="SYSTEM" />
+        <install-in user-type="FULL" />
+        <install-in user-type="PROFILE" />
+        <do-not-install-in user-type="android.os.usertype.profile.CLONE" />
+        <do-not-install-in user-type="android.os.usertype.profile.PRIVATE" />
+    </install-in-user-type>
+</config>
