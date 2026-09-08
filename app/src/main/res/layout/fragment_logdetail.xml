@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    One domain, or one app, and the three things that can be done about it.
+
+    The evidence comes first and the actions after it: a user who is about to
+    exempt an app should see what that app actually asked for before deciding.
+-->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:id="@+id/detail_title"
+            style="@style/Nullroute.CardTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textIsSelectable="true" />
+
+        <TextView
+            android:id="@+id/detail_truncated"
+            style="@style/Nullroute.Caption"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/logui_detail_truncated"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/detail_stats"
+            style="@style/Nullroute.Body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp" />
+
+        <TextView
+            android:id="@+id/detail_exempt_state"
+            style="@style/Nullroute.Caption"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp" />
+
+        <TextView
+            android:id="@+id/detail_recent_header"
+            style="@style/Nullroute.Label"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp" />
+
+        <!-- Filled with item_log rows; a handful of lines does not need a
+             RecyclerView, and a nested scrolling list inside a ScrollView is a
+             worse experience than a short static one. -->
+        <LinearLayout
+            android:id="@+id/detail_recent_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
+        <TextView
+            android:id="@+id/detail_recent_empty"
+            style="@style/Nullroute.Caption"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/log_empty"
+            android:visibility="gone" />
+
+        <TextView
+            style="@style/Nullroute.CardTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="@string/rec_header" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/detail_allow"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/log_action_allow" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/detail_rebuild"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/rec_action_rebuild"
+            android:visibility="gone" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/detail_exempt"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/log_action_exempt" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/detail_force_stop"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/log_action_force_stop" />
+
+        <TextView
+            android:id="@+id/detail_status"
+            style="@style/Nullroute.Body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:visibility="gone" />
+
+        <!-- The two sentences this screen exists to say, always visible, never
+             behind a "learn more". -->
+        <TextView
+            style="@style/Nullroute.Caption"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/log_action_note" />
+
+        <TextView
+            style="@style/Nullroute.Caption"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/rec_cache_note" />
+
+    </LinearLayout>
+</ScrollView>

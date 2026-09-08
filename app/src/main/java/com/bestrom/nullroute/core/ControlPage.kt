@@ -144,6 +144,24 @@ object ControlPage {
 
     val logLevel: Int get() = readByte(OFF_LOG_LEVEL)
 
+    /**
+     * Whether the resolver walks CNAME chains in answers (H5).
+     *
+     * **This byte is the only authority for the setting.** Unlike `mode` it gets
+     * no mirror in preferences and no `persist.` property: init never needs to
+     * re-derive it, so a second copy would only be a second thing that can
+     * disagree — which is the failure the mode/property split exists to avoid.
+     * The page lives on /data and keeps its value across a reboot; a device where
+     * it cannot be mapped has no working filter to configure anyway.
+     */
+    val cnameUncloak: Boolean get() = readByte(OFF_CNAME_UNCLOAK) != 0
+
+    fun setCnameUncloak(enabled: Boolean): Boolean {
+        val ok = writeByte(OFF_CNAME_UNCLOAK, if (enabled) 1 else 0)
+        bumpEpoch()
+        return ok
+    }
+
     val wantGeneration: Long get() = readLong(OFF_WANT_GENERATION)
 
     val configEpoch: Int get() = readInt(OFF_CONFIG_EPOCH)

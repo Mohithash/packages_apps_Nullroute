@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Advanced screen (Phase 5).
+
+    Two settings live here rather than in Settings because both of them cost
+    something the user has to be told about before choosing: CNAME uncloaking
+    spends work on every answer, and per-app policy reaches further than the
+    profile it is set from. A screen that hid either would be offering a choice
+    the user could not actually make.
+-->
+<resources>
+
+    <string name="adv_title">Advanced</string>
+    <string name="adv_intro">Settings with a cost worth knowing about. The defaults are what most devices should keep.</string>
+
+    <!-- CNAME uncloaking -->
+    <string name="adv_cname_title">Uncloak CNAME trackers</string>
+    <string name="adv_cname_switch">Inspect answers, not just questions</string>
+    <string name="adv_cname_what">Some trackers are served under a name belonging to the site you are on — <i>metrics.example.com</i> — which then resolves onto the tracker\'s real domain. The question looks first-party, so nothing on a blocklist can match it. Only the answer names the tracker. This checks the answer.</string>
+    <string name="adv_cname_cost">The cost: every answer that arrives is parsed and each name in its chain is checked against the index — up to eight extra lookups for a lookup that would otherwise have been one. Blocked-tracker rows in the log will name the tracker rather than the site\'s own subdomain, and the query counters count evaluations rather than lookups.</string>
+    <string name="adv_cname_on">On — answers are being checked.</string>
+    <string name="adv_cname_off">Off — only the queried name is checked.</string>
+    <string name="adv_cname_unavailable">Unavailable: the control page is not mapped, so this switch has nothing to write to.</string>
+    <string name="adv_cname_write_failed">Could not write the setting. Nothing changed.</string>
+
+    <!-- Per-user policy -->
+    <string name="adv_scope_title">Who per-app policy applies to</string>
+    <string name="adv_scope_measuring">Checking…</string>
+    <string name="adv_scope_shared">Policy is stored per app, not per profile. The resolver looks it up by app ID and never sees which user asked, so blocking or exempting an app here does the same for that app in <b>every</b> profile on this device.</string>
+    <string name="adv_scope_user">This copy of Nullroute runs as user %1$d.</string>
+    <string name="adv_scope_managed">This is a work profile. Changes made here reach the device owner\'s apps too.</string>
+    <string name="adv_scope_this_user_only">No other user has resolved anything yet, so nothing else is affected right now.</string>
+    <string name="adv_scope_every_user">Other users seen in the query log: %1$s. Their copies of the same app share this policy.</string>
+    <string name="adv_scope_no_log">The query log is off or empty, so other profiles cannot be listed — which is not evidence that none exist.</string>
+
+    <!-- Honesty footer -->
+    <string name="adv_footer_title">What this screen cannot prove</string>
+    <string name="adv_footer">These switches write to the control page. The resolver inside netd is what acts on them, and a build whose resolver patch was applied without the CNAME hunk will read the byte and ignore it. There is no probe for that yet, so treat the switch as a request rather than as a report.</string>
+
+</resources>

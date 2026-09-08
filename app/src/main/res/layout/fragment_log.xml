@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The query log.
+
+    Order is deliberate: the honesty banner sits ABOVE the list, not below it, so
+    a user cannot read a truncated log as a complete one and only then discover
+    the footnote. Everything below the banner describes what is in the list.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <com.google.android.material.button.MaterialButtonToggleGroup
+        android:id="@+id/log_view_group"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:selectionRequired="true"
+        app:singleSelection="true">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/log_view_apps"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/logui_view_apps" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/log_view_domains"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/logui_view_domains" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/log_view_recent"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/logui_view_recent" />
+    </com.google.android.material.button.MaterialButtonToggleGroup>
+
+    <androidx.appcompat.widget.SwitchCompat
+        android:id="@+id/log_blocked_only"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="@string/logui_blocked_only" />
+
+    <TextView
+        android:id="@+id/log_blocked_only_note"
+        style="@style/Nullroute.Caption"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/logui_blocked_only_note" />
+
+    <!--
+        Shown only when the resolver reports ring_drops, or the drain saw a torn
+        or overwritten slot. It is never hidden to keep the screen tidy: a log
+        that silently omits records is a log that misleads.
+    -->
+    <TextView
+        android:id="@+id/log_incomplete_banner"
+        style="@style/Nullroute.Body"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:textColor="@color/nr_status_warn"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/log_state"
+        style="@style/Nullroute.Body"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:visibility="gone" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/log_list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="8dp"
+        android:layout_weight="1"
+        android:clipToPadding="false" />
+
+    <TextView
+        android:id="@+id/log_window"
+        style="@style/Nullroute.Caption"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp" />
+
+    <TextView
+        style="@style/Nullroute.Caption"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="@string/log_locked_note" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="horizontal">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/log_refresh"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/logui_refresh" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/log_privacy"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:text="@string/logui_privacy_button" />
+    </LinearLayout>
+
+</LinearLayout>

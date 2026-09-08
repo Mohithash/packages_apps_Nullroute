@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A caption row. Used for the empty state, the syntax table and the
+     "these lines could not be read" explanation, so that all three scroll with
+     the list instead of competing with it for the bottom of the screen. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="6dp"
+    android:orientation="vertical">
+
+    <TextView
+        android:id="@+id/ui2_note_title"
+        style="@style/Nullroute.Body"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:fontFamily="monospace" />
+
+    <TextView
+        android:id="@+id/ui2_note_detail"
+        style="@style/Nullroute.Caption"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp" />
+</LinearLayout>

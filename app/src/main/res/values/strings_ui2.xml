@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Phase 2 screens: Rules, Query, Apps, Categories, Sources.
+
+    Owned by the ui2 feature. Nothing here is edited by another feature and
+    nothing here edits strings.xml — see docs/needs-ui2.md for the four lines
+    that must be added to files this feature does not own.
+-->
+<resources>
+
+    <!-- ==== tabs ========================================================== -->
+    <string name="tab_rules">Rules</string>
+    <string name="tab_query">Query</string>
+    <string name="tab_apps">Apps</string>
+    <string name="tab_categories">Categories</string>
+    <string name="tab_sources">Sources</string>
+
+    <!-- ==== Rules ========================================================= -->
+    <string name="rules_header">Your rules</string>
+    <string name="rules_header_note">Patterns are stored, never expanded. A “*.” rule keeps covering whatever the blocklists add later, so it cannot quietly go stale.</string>
+
+    <string name="rules_tab_allow">Allow</string>
+    <string name="rules_tab_deny">Block</string>
+    <string name="rules_tab_redirect">Redirect</string>
+
+    <string name="rules_input_allow">Domain to allow</string>
+    <string name="rules_input_deny">Domain to block</string>
+    <string name="rules_input_redirect">Address and domain</string>
+    <string name="rules_input_hint_redirect">1.2.3.4 example.com</string>
+
+    <string name="rules_add">Add</string>
+    <string name="rules_remove">Remove</string>
+
+    <string name="rules_preview_checking">Counting…</string>
+    <!-- %1$d = rules the pattern covers, %2$s = the plain-English reading -->
+    <string name="rules_preview_matches">Matches %1$d entries — %2$s</string>
+    <string name="rules_preview_matches_at_least">Matches at least %1$d entries — %2$s</string>
+    <string name="rules_preview_none">Matches nothing in the current index — %1$s</string>
+    <string name="rules_preview_breakdown">%1$d blocked, %2$d already allowed, of %3$d rules in this index</string>
+    <string name="rules_preview_unavailable">Rule text for this index is not on the device, so the count cannot be shown. The rule will still be added.</string>
+    <string name="rules_preview_show">Show them</string>
+
+    <string name="rules_matched_title">What this pattern covers</string>
+    <string name="rules_matched_more">…and %1$d more.</string>
+    <string name="rules_matched_row_allow">allow · %1$s</string>
+    <string name="rules_matched_row_block">block · %1$s</string>
+    <string name="rules_matched_row_unknown">block · source unknown</string>
+
+    <string name="rules_added">Added. It takes effect at the next build.</string>
+    <string name="rules_duplicate">That rule is already in the list.</string>
+    <string name="rules_write_failed">The rule could not be saved. The rule file is under /data/misc/nullroute/priv.</string>
+    <string name="rules_removed">Removed. It takes effect at the next build.</string>
+
+    <string name="rules_empty_allow">No allow rules yet.</string>
+    <string name="rules_empty_deny">No block rules yet.</string>
+    <string name="rules_empty_redirect">No redirects yet.</string>
+
+    <string name="rules_unparsable_header">Lines this file could not read</string>
+    <string name="rules_unparsable_note">These are in allow.txt and are being ignored. A rule that was silently dropped is a rule you think is protecting you.</string>
+
+    <string name="rules_syntax_header">Syntax</string>
+    <string name="rules_footer">Rules are pinned: they survive a profile switch, a list update and a reset. They are compiled into the index at the next build.</string>
+
+    <!-- ==== Query ========================================================= -->
+    <string name="query_header">Ask the index</string>
+    <string name="query_header_note">This runs the same matcher netd runs, against the index the device is serving right now — not a guess about it.</string>
+    <string name="query_input">Host name</string>
+    <string name="query_run">Check</string>
+    <string name="query_checking">Checking…</string>
+
+    <string name="query_verdict_blocked">Blocked</string>
+    <string name="query_verdict_redirected">Redirected</string>
+    <string name="query_verdict_pass">Not blocked</string>
+    <string name="query_verdict_unknown">No answer</string>
+
+    <string name="query_input_required">Enter a host name to check.</string>
+    <string name="query_blocked_detail">The resolver answers this name from the index instead of the network, so nothing on the device reaches it.</string>
+    <string name="query_pass_detail">Nothing in this index matches this name. DNS for it resolves normally.</string>
+    <string name="query_unknown_detail">The index could not be read, so there is no verdict to give. This is not the same as “not blocked”.</string>
+    <string name="query_not_evaluated">The matcher does not look at this name at all — an address literal, a single label, or a reserved suffix such as .local. The resolver passes it through untouched.</string>
+
+    <!-- %1$s = the rule text that matched -->
+    <string name="query_matched_rule">Matched rule: %1$s</string>
+    <!-- %1$d = label depth the match happened at, %2$d = labels in the name -->
+    <string name="query_depth">Matched at label depth %1$d of %2$d.</string>
+    <string name="query_source">Source: %1$s</string>
+    <string name="query_source_unnamed">Source: group %1$d (the manifest for this index generation is missing, so it has no name)</string>
+    <string name="query_redirect_address">Answered with %1$s.</string>
+
+    <string name="query_omission_header">Why this one is not in the lists</string>
+    <string name="query_omission_note">The upstream lists deliberately leave the apex of doubleclick.net, googleadservices.com and graph.facebook.com unblocked and block their specific ad subdomains instead — blocking the apex breaks Google sign-in, Play billing and Facebook login in apps that use them. google-analytics.com is present and is blocked. So “this domain is not blocked” here is a decision by the list author, not a broken filter.</string>
+    <string name="query_omission_specific">%1$s is one of the names the upstream lists leave alone on purpose: they block its ad subdomains and leave the apex resolvable, because blocking it breaks sign-in and billing. This is not a sign that filtering has stopped.</string>
+    <string name="query_check_home">If you think filtering has stopped, the Home screen measures it. This screen only reads the index.</string>
+
+    <string name="query_index_missing">There is no index on this device yet, so there is nothing to ask. Run an update first.</string>
+
+    <!-- ==== Apps ========================================================== -->
+    <string name="apps_header">Per-app filtering</string>
+    <string name="apps_header_note">netd reads the calling app\'s uid from the socket, so an exemption here is exact rather than a guess about which app is in the foreground.</string>
+    <string name="apps_search">Search apps</string>
+    <string name="apps_exempt">Exempt from filtering</string>
+    <string name="apps_filtered">Filtered</string>
+    <string name="apps_exempt_state">Exempt — nothing is blocked for this app</string>
+    <string name="apps_shared_uid">Shares a uid with %1$d other apps; exempting it exempts all of them.</string>
+    <string name="apps_self_reason">Nullroute filters itself on purpose. The Home screen proves filtering is live by resolving its own probe name, so an exemption here would make a healthy device report “not filtering”.</string>
+    <string name="apps_unattributed_note">No installed package claims this uid any more. The exemption is still live in the control page; switching it off is how you clear it.</string>
+    <string name="apps_no_control">The control page is not mapped, so per-app policy cannot be changed. Diagnostics has the reason.</string>
+    <string name="apps_failed">Could not write the policy: %1$s</string>
+    <string name="apps_applies_now">Applied. It takes effect on this app\'s next DNS query.</string>
+    <string name="apps_no_strict_note">There is no “strict” setting. The resolver only implements an exemption, and a switch that changed nothing would be worse than no switch.</string>
+    <string name="apps_loading">Reading installed apps…</string>
+    <string name="apps_empty">No apps could be listed.</string>
+
+    <!-- ==== Categories ==================================================== -->
+    <string name="cats_header">Add-ons</string>
+    <string name="cats_header_note">Independent of the profile. Each row says what turning it on costs, because two of them are switches that read backwards.</string>
+    <string name="cats_on_consequence_block">ON blocks these domains.</string>
+    <string name="cats_on_consequence_carveout">ON stops allowing these domains and lets the blocklists block them.</string>
+    <string name="cats_approx_domains">about %1$s domains</string>
+    <string name="cats_carveout_domains">about %1$s domains, allowed by default</string>
+
+    <string name="cats_confirm_title">This one breaks things</string>
+    <string name="cats_confirm_enable">Turn it on anyway</string>
+    <string name="cats_confirm_cancel">Leave it off</string>
+
+    <string name="cats_confirm_vpn">Turning this on blocks the endpoints your own VPN or private DNS uses. If you use either, they will stop connecting and the cause will not be obvious.</string>
+    <string name="cats_confirm_banking">Turning this on lets the blocklists block device-fingerprinting hosts. Banking and payment apps are built on them: expect logins that spin forever or refuse to complete.</string>
+    <string name="cats_confirm_delivery">Turning this on lets the blocklists block deferred deep-link hosts. Delivery, ride-hailing and referral flows use them: expect onboarding loops and links that open the wrong screen.</string>
+
+    <string name="cats_footer">Changes are compiled in at the next build. Until then the index is unchanged.</string>
+
+    <!-- ==== Sources ======================================================= -->
+    <string name="srcedit_header">Sources for %1$s</string>
+    <string name="srcedit_header_note">The shipped profile is read-only, so your edits are stored as an overlay. An OTA can change what this profile means without discarding them.</string>
+    <string name="srcedit_add_url">List URL</string>
+    <string name="srcedit_add">Add source</string>
+    <string name="srcedit_role_block">Block list</string>
+    <string name="srcedit_role_allow">Allow list</string>
+    <string name="srcedit_role_note">A list\'s own syntax cannot tell the two apart — HaGeZi ships the same 1,604 domains as both a blocklist and an allowlist — so this has to be recorded, not sniffed.</string>
+
+    <string name="srcedit_bad_url">Enter a full https:// URL.</string>
+    <string name="srcedit_duplicate">That URL is already in this profile.</string>
+    <string name="srcedit_added">Added. It is fetched at the next update.</string>
+    <string name="srcedit_removed">Removed. It stops being fetched at the next update.</string>
+    <string name="srcedit_write_failed">The overlay could not be written under /data/misc/nullroute/priv/profiles.</string>
+
+    <string name="srcedit_user_added">added by you</string>
+    <string name="srcedit_shipped">ships with the ROM</string>
+    <string name="srcedit_disabled">switched off, remembered</string>
+    <string name="srcedit_approx">about %1$s domains</string>
+    <string name="srcedit_unknown_source">Not in the catalogue, so its licence and size are unknown and its content is never baked into the image.</string>
+
+    <string name="srcedit_reset">Reset to what the ROM ships</string>
+    <string name="srcedit_reset_done">Your edits to this profile were dropped.</string>
+    <string name="srcedit_reset_none">This profile has no edits to reset.</string>
+    <string name="srcedit_footer">Editing sources changes what is fetched, not what is currently blocked. Run an update to compile it in.</string>
+
+</resources>

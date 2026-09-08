@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Phase 3 UI strings: the log screens, settings, privacy and onboarding.
+
+    Its own values file so this feature can be written, reviewed and reverted
+    without touching values/strings.xml or the log backend's strings_log.xml.
+    Where a string already exists in strings_log.xml (log_incomplete,
+    log_row_blocked, log_action_*) it is reused rather than re-worded: the same
+    fact stated twice in two voices is how a UI starts contradicting itself.
+
+    Prefixes here are logui_, rec_, sett_, priv_, onb_ and qsp_ - every other
+    prefix in this app is already owned by another values file.
+-->
+<resources>
+
+    <!-- ==================== Log ==================== -->
+
+    <string name="logui_tab">Log</string>
+    <string name="logui_view_apps">Apps</string>
+    <string name="logui_view_domains">Domains</string>
+    <string name="logui_view_recent">Recent</string>
+
+    <string name="logui_blocked_only">Blocked only</string>
+    <!--
+        Default on. "Everything" is a browsing history and the user has to opt
+        into producing one; this switch only filters what is already stored, so
+        it says plainly that passes may never have been recorded at all.
+    -->
+    <string name="logui_blocked_only_note">Passes only appear if logging is set to Everything. Otherwise they were never recorded in the first place.</string>
+
+    <string name="logui_window">%1$d records stored, oldest %2$s.</string>
+    <string name="logui_window_empty">No records stored.</string>
+
+    <string name="logui_app_row">%1$d blocked of %2$d looked up</string>
+    <string name="logui_domain_row">%1$d blocked · last %2$s</string>
+    <string name="logui_recent_row">%1$s · %2$s</string>
+    <string name="logui_group">rule group %1$d</string>
+
+    <string name="logui_refresh">Refresh</string>
+    <string name="logui_privacy_button">Privacy &amp; retention</string>
+
+    <!--
+        Not an error. CE storage does not exist before the first unlock after a
+        reboot, which is the entire point of putting the log there.
+    -->
+    <string name="logui_db_unavailable">The log is not readable yet. It lives in credential-encrypted storage, which only exists after the first unlock since boot.</string>
+    <string name="logui_ring_unavailable">The ring buffer could not be read, so anything logged since this screen last refreshed is missing here. Diagnostics has the reason.</string>
+    <string name="logui_empty_filtered">Nothing matches this filter.</string>
+
+    <!-- ==================== Log detail ==================== -->
+
+    <string name="logui_detail_stored">%1$d records stored for this name</string>
+    <string name="logui_detail_last_seen">Last seen %1$s</string>
+    <string name="logui_detail_latest">Latest verdict: %1$s</string>
+    <string name="logui_detail_asked_by">Asked for by %1$s</string>
+    <string name="logui_detail_asked_by_many">Asked for by %1$d apps</string>
+    <string name="logui_detail_depth">Matched %1$d labels from the right</string>
+    <!--
+        The resolver keeps the TAIL of an over-long name because the matched rule
+        is always a suffix. Say that, rather than letting the user read the
+        fragment as the whole name and conclude we blocked something we did not.
+    -->
+    <string name="logui_detail_truncated">Only the end of this name was stored. The matched rule is a suffix, so what is shown is the part that matched: the beginning of the name is missing, not blocked.</string>
+    <string name="logui_detail_recent_header">Recent lookups</string>
+    <string name="logui_detail_app_header">Recent lookups by this app</string>
+
+    <!-- ==================== Recovery actions ==================== -->
+
+    <string name="rec_header">If this broke something</string>
+    <!--
+        The paragraph this screen exists for. Un-blocking IS instant at the
+        resolver: a blocked answer is never inserted into res_cache, so there is
+        no stale entry of ours to flush. What we cannot reach is the cache inside
+        the app, because `neverallow ... dnsresolver_service` means this app can
+        never call IDnsResolver.flushNetworkCache. Promising a fix we cannot
+        deliver would be worse than the block.
+    -->
+    <string name="rec_cache_note">Un-blocking takes effect on the resolver\'s very next lookup: a blocked answer is never put in the system DNS cache, so there is nothing stale of ours to clear. What Nullroute cannot reach is the cache inside the app itself. OkHttp, Chromium and the Java resolver each remember a failed lookup for a while, and Android does not let this app flush them. That is why force stop is offered here.</string>
+
+    <string name="rec_allow_done">Rule added for %1$s.</string>
+    <string name="rec_allow_pending">It is not live yet. An allow rule only takes effect once the index has been recompiled.</string>
+    <string name="rec_allow_duplicate">%1$s is already allowed.</string>
+    <string name="rec_allow_bad">Not a usable rule: %1$s</string>
+    <string name="rec_allow_write_failed">The rule could not be written to allow.txt. Diagnostics has the storage state.</string>
+    <string name="rec_action_rebuild">Compile the index now</string>
+    <string name="rec_rebuild_running">Compiling. This uses the lists already downloaded and does not need the network.</string>
+
+    <string name="rec_exempt_done">%1$s is exempt from filtering as of the resolver\'s next lookup.</string>
+    <string name="rec_exempt_undone">%1$s is filtered again.</string>
+    <string name="rec_exempt_self">Nullroute will not exempt itself. The liveness probe resolves from this process, so an exemption here would make the status card report a healthy filter as dead.</string>
+    <string name="rec_exempt_unavailable">Per-app policy cannot be changed: control.bin is not mapped. Diagnostics has the reason.</string>
+    <string name="rec_exempt_unknown_app">This uid belongs to no installed package, so there is nothing to exempt. Usually it is an app that was uninstalled after the record was written.</string>
+    <string name="rec_action_unexempt">Filter this app again</string>
+    <string name="rec_exempt_state_on">Exempt, not filtered</string>
+    <string name="rec_exempt_state_off">Filtered normally</string>
+
+    <string name="rec_force_stop_title">Force stop %1$s?</string>
+    <string name="rec_force_stop_body">The app closes immediately and loses anything unsaved. It starts again the next time you open it, with its in-process DNS caches empty, which is the point.</string>
+    <string name="rec_force_stop_done">Stopped %1$s.</string>
+    <string name="rec_force_stop_failed">Could not stop %1$s: %2$s</string>
+    <string name="rec_force_stop_unavailable">This build cannot force stop apps: FORCE_STOP_PACKAGES is not granted. Close the app from Recents instead.</string>
+    <string name="rec_force_stop_self">Nullroute will not force stop itself.</string>
+    <string name="rec_cancel">Cancel</string>
+    <string name="rec_confirm">Continue</string>
+
+    <!-- ==================== Settings ==================== -->
+
+    <string name="sett_tab">Settings</string>
+
+    <string name="sett_response_header">What a blocked lookup answers</string>
+    <string name="sett_response_note">This changes how an app experiences a block. It does not change what gets blocked.</string>
+
+    <string name="sett_resp_noname">Name does not exist (EAI_NONAME)</string>
+    <string name="sett_resp_noname_detail">Byte-identical to a real NXDOMAIN. The app makes no connection attempt and spends no battery on one. The default, and the right answer almost everywhere.</string>
+
+    <string name="sett_resp_nodata">No address of that type (EAI_NODATA)</string>
+    <string name="sett_resp_nodata_detail">The name exists but has no address. Some apps treat NXDOMAIN as a hard error or a retry loop and treat this as an ordinary empty result. Worth trying when one of them misbehaves.</string>
+
+    <string name="sett_resp_sinkhole">Answer 0.0.0.0 (sinkhole)</string>
+    <!--
+        The trap, stated in full. Linux treats connect() to 0.0.0.0 as
+        INADDR_LOOPBACK, so the app does not fail to connect: it connects to
+        itself, and whatever it happens to be listening on answers. Anyone who
+        has seen 0.0.0.0 in a hosts file assumes it means "nowhere". It does not.
+    -->
+    <string name="sett_resp_sinkhole_detail">Not \"nowhere\". Linux rewrites a connection to 0.0.0.0 into a connection to 127.0.0.1, so the app connects to itself and whatever it is listening on answers, which can look exactly like the ad server replied. It also costs a socket and a timeout per request. An escape hatch for one stubborn app, never a default.</string>
+    <string name="sett_resp_sinkhole_confirm_title">Answer blocked lookups with 0.0.0.0?</string>
+    <string name="sett_resp_sinkhole_confirm_body">Apps will connect to themselves instead of failing. Use it to work around one app that breaks on NXDOMAIN, then put it back.</string>
+
+    <!-- Saving a setting the resolver cannot see yet is a half-success, and
+         saying "saved" alone would hide the half that matters. -->
+    <string name="sett_control_unavailable">Saved, but not live: control.bin is not mapped, so the resolver is still using its previous setting. Diagnostics has the reason.</string>
+
+    <string name="sett_updates_header">Updates</string>
+    <string name="sett_auto_update">Update lists automatically</string>
+    <string name="sett_auto_update_detail">Once a day, when the battery is not low.</string>
+    <string name="sett_unmetered">Only on unmetered networks</string>
+    <string name="sett_unmetered_detail">Off allows a list download on mobile data. Lists are fetched conditionally, so an unchanged list costs one request.</string>
+    <!--
+        The scheduler's state, not the preference. A persisted job can be lost
+        without the preference changing, and a user reading "on" while nothing
+        runs has no way to find that out.
+    -->
+    <string name="sett_schedule_on">The daily job is registered with the system scheduler.</string>
+    <string name="sett_schedule_off">No update job is registered, so nothing will update on its own.</string>
+    <string name="sett_update_now">Update now</string>
+    <string name="sett_update_started">Update started. The Update screen shows what it is doing.</string>
+
+    <string name="sett_more_header">More</string>
+    <string name="sett_privacy_button">Privacy &amp; retention</string>
+    <string name="sett_intro_button">Show the introduction again</string>
+    <string name="sett_tile_button">Quick Settings tile</string>
+
+    <string name="sett_scope_note">Nullroute filters names. An ad served from the same domain as the content around it has no separate name to refuse, so nothing at this layer blocks it, and an app that resolves its own names, Chrome included, is only filtered when Deep mode is on.</string>
+
+    <!-- ==================== Privacy ==================== -->
+
+    <string name="priv_title">Privacy &amp; retention</string>
+
+    <!--
+        The storage choice is the privacy control, so it is stated first and in
+        plain terms instead of being left as an implementation detail.
+    -->
+    <string name="priv_storage_note">The query log is the one thing Nullroute keeps in credential-encrypted storage. Until you unlock the device after a reboot nothing can read it, Nullroute included, so a phone that is off or locked holds no readable browsing history. Lookups made in that window are never stored, and the log says so rather than quietly looking complete.</string>
+
+    <string name="priv_log_header">What gets logged</string>
+    <string name="priv_log_note">This is set at the source. Turning it off stops the resolver writing records, not merely this app storing them, and it deletes what is already stored.</string>
+
+    <string name="priv_retention_header">How long records are kept</string>
+    <string name="priv_days_1">1 day</string>
+    <string name="priv_days_7">7 days</string>
+    <string name="priv_days_30">30 days</string>
+    <string name="priv_days_90">90 days</string>
+    <string name="priv_retention_note">Shortening this deletes anything already older, immediately. Records are also capped at %1$d rows, oldest dropped first.</string>
+
+    <string name="priv_stats">%1$d records stored, oldest %2$s.</string>
+    <string name="priv_stats_empty">Nothing stored.</string>
+    <string name="priv_stats_unavailable">The log database is not readable right now, for the reason above.</string>
+
+    <string name="priv_purge">Apply retention now</string>
+    <string name="priv_purged">Removed %1$d records.</string>
+    <string name="priv_purge_none">Nothing was old enough or over the cap.</string>
+    <string name="priv_clear_confirm_title">Delete the whole query log?</string>
+    <string name="priv_clear_confirm_body">Every stored record goes. This cannot be undone, and it does not change what is logged from now on.</string>
+
+    <string name="priv_mode_all_confirm_title">Record every lookup?</string>
+
+    <!-- ==================== Onboarding ==================== -->
+
+    <string name="onb_title">Nullroute</string>
+    <string name="onb_step">%1$d of %2$d</string>
+    <string name="onb_next">Next</string>
+    <string name="onb_back">Back</string>
+    <string name="onb_done">Get started</string>
+    <string name="onb_skip">Skip</string>
+
+    <string name="onb_1_title">Blocking happens inside the resolver</string>
+    <string name="onb_1_body">Every app on this device asks the system resolver for names, and Nullroute answers the blocked ones there. No VPN slot is taken, nothing proxies your traffic, and there is no service to keep alive: the filter is already inside the process that was going to answer anyway.</string>
+
+    <!--
+        The limits, second, before anything that sounds like a promise. A stated
+        limit is forgiven; the same limit discovered later reads as a lie.
+    -->
+    <string name="onb_2_title">What it cannot do</string>
+    <string name="onb_2_body">An ad served from the same domain as the content around it has no separate name to refuse, so it is not blocked. That is true of every DNS-based blocker, this one included. Chrome and some other apps resolve names themselves and bypass the system resolver entirely; they are only filtered if you turn on Deep mode, which does take the VPN slot. And blocking by name cannot see inside a connection, so Nullroute counts requests refused, never ads removed from a page.</string>
+
+    <string name="onb_3_title">When something breaks, fix it in two taps</string>
+    <string name="onb_3_body">If an app starts failing, Nullroute notices the burst of blocked lookups coming from whatever you are using and offers to exempt it. In the log you can allow a single domain or exempt the whole app. Un-blocking is instant at the resolver, but apps cache their own failures, so the app may need to be reopened. Force stop sits next to the button for exactly that reason.</string>
+
+    <string name="onb_4_title">The log stays on the device</string>
+    <string name="onb_4_body">Logging starts at blocked lookups only, kept for seven days, in storage that is unreadable until you unlock the phone. Nothing is uploaded, there is no account, and updating fetches public blocklists without sending anything about you. You can turn logging off completely, and off means the resolver stops writing records at all.</string>
+
+    <!-- ==================== Quick Settings tile preferences ==================== -->
+
+    <string name="qsp_title">Quick Settings tile</string>
+    <string name="qsp_action_header">What tapping the tile does</string>
+    <string name="qsp_action_toggle">Pause and resume filtering</string>
+    <string name="qsp_action_toggle_detail">Pausing stops the resolver filter. The roughly 2,000 domains in the built-in hosts list keep being blocked either way: pause is not off.</string>
+    <string name="qsp_action_open">Open Nullroute</string>
+    <string name="qsp_action_open_detail">One tap further away from switching protection off by accident, and safer on a lock screen other people can reach.</string>
+
+    <string name="qsp_confirm">Ask before pausing</string>
+    <string name="qsp_confirm_detail">Opens the app to confirm instead of pausing straight from the shade.</string>
+
+    <string name="qsp_state_note">The tile label shows the last measured state rather than a live one, because a Quick Settings tile has no time to run a probe. Opening the app re-measures.</string>
+    <string name="qsp_saved">Saved.</string>
+
+</resources>

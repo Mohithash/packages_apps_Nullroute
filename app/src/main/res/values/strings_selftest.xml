@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Copy for the two screens this feature owns: the Deep-mode switch
+    (ui/DeepModeFragment) and "Test my blocking" (ui/SelfTestFragment).
+
+    WHY DEEP-MODE STRINGS ARE IN A FILE CALLED strings_selftest. res/values is
+    merged by aapt2, so every <resources> file contributes to one R class and a
+    name may be defined exactly once across all of them. strings_deep.xml belongs
+    to the deep/ service feature and already defines every `deep_*` name it uses;
+    editing it from here would put two features in one file. The screen-level copy
+    therefore lives here under a `deepui_` prefix, which cannot collide with the
+    `deep_` names next door even by accident.
+
+    THE TWO SENTENCES THAT MAY NOT BE SOFTENED:
+
+      deepui_summary   says Deep mode also filters Chrome and apps that run their
+                       own DNS, AND that it takes the VPN slot so no other VPN can
+                       run at the same time. Both halves, above the fold, before
+                       the user flips the switch. A user who discovers the second
+                       half later — from their work VPN failing — was misled.
+
+      selftest_caveat  says what the test cannot see. A self-test that reports
+                       three greens and stays quiet about in-app DoH to a
+                       hardcoded IP is a worse lie than no self-test, because the
+                       user now has evidence for a belief that is wrong.
+-->
+<resources>
+
+    <!-- ==================== Deep mode screen ==================== -->
+
+    <string name="tab_deep">Deep mode</string>
+    <string name="deepui_title">Deep mode</string>
+
+    <!-- Both halves are load-bearing. See the file header. -->
+    <string name="deepui_summary">Deep mode also filters Chrome and apps that run their own DNS. It uses your device\'s VPN slot, so another VPN cannot run at the same time.</string>
+
+    <string name="deepui_switch_label">Filter Chrome and apps with their own DNS</string>
+
+    <string name="deepui_state_header">Right now</string>
+    <string name="deepui_state_off">Off. Nullroute is filtering only the apps that use Android\'s system resolver.</string>
+    <string name="deepui_state_off_norom">Off, and nothing else on this device is filtering DNS. Turn Deep mode on to block anything at all.</string>
+    <string name="deepui_state_starting">Starting the DNS tunnel…</string>
+    <string name="deepui_state_on">On. The tunnel answered its own probe, so it is genuinely carrying DNS.</string>
+    <string name="deepui_state_unverified">On, but unverified — the tunnel is established and has not yet answered its own probe. Give it a few seconds and re-check.</string>
+    <string name="deepui_state_enabled_not_running">Turned on, but the tunnel is not running. Android may have revoked it, or another VPN holds the slot.</string>
+
+    <string name="deepui_consent_declined">You did not allow the VPN, so Deep mode stayed off. Nothing else changed.</string>
+
+    <!--
+        The auto-disable history. Shown ONLY if the watchdog has ever fired on
+        this device: an empty "no failures yet" panel would be noise on every
+        other device, and this panel exists to explain a switch that moved by
+        itself.
+    -->
+    <string name="deepui_history_header">Deep mode switched itself off</string>
+    <string name="deepui_history_rule">The rule is %1$d failures inside %2$d minutes. It applies to sessions that established a tunnel and then stopped answering — not to a start that never got that far, and not to another app taking the VPN slot.</string>
+    <string name="deepui_history_reason">Reason given: %1$s</string>
+    <string name="deepui_history_last_error">Last recorded failure: %1$s</string>
+    <plurals name="deepui_history_recent">
+        <item quantity="one">%1$d failure is still inside the current window, the most recent at %2$s.</item>
+        <item quantity="other">%1$d failures are still inside the current window, the most recent at %2$s.</item>
+    </plurals>
+    <string name="deepui_history_cleared">Turning Deep mode back on clears this history and starts the count again.</string>
+    <string name="deepui_history_none">Deep mode has never switched itself off on this device.</string>
+
+    <string name="deepui_scope_header">What Deep mode still cannot block</string>
+
+    <!--
+        The default was decided once, by DeepWatchdog.resolveDefault(), from
+        whether this image publishes sys.nullroute.filter. Saying which way it
+        went and why is the difference between a switch the user can reason about
+        and one that was simply in some state when they arrived.
+    -->
+    <string name="deepui_default_header">Why it started out this way</string>
+
+    <string name="deepui_action_test">Test my blocking</string>
+    <string name="deepui_action_recheck">Re-check</string>
+
+    <string name="deepui_unavailable">Deep mode state could not be read. That is a fault in Nullroute, not a statement about whether the tunnel is up.</string>
+
+    <!-- ==================== Self-test screen ==================== -->
+
+    <string name="tab_selftest">Test</string>
+    <string name="selftest_title">Test my blocking</string>
+    <string name="selftest_intro">This asks for one domain your blocklist says it blocks, three different ways, and reports which of them leaked. It is a measurement of this device as it is configured right now — not a claim about Nullroute in general.</string>
+
+    <string name="selftest_action_run">Run the test</string>
+    <string name="selftest_action_rerun">Run it again</string>
+    <string name="selftest_running">Testing…</string>
+
+    <string name="selftest_domain_label">Domain tested</string>
+    <string name="selftest_domain_none">No domain could be tested</string>
+    <string name="selftest_domain_source">Chosen because the compiled index says it is blocked, rule %1$s. A domain the index does not block would make every lane below meaningless.</string>
+    <string name="selftest_domain_unavailable">Nullroute could not confirm any candidate domain against the compiled index, so it did not run a test it could not interpret. Check the Home screen: this usually means no index is published yet.</string>
+
+    <string name="selftest_lane_system">1. Apps using Android\'s system resolver</string>
+    <string name="selftest_lane_webview">2. An in-app browser (WebView, the same engine as Chrome)</string>
+    <string name="selftest_lane_browser">3. Your default browser (%1$s)</string>
+    <string name="selftest_lane_browser_unknown">3. Your default browser</string>
+
+    <string name="selftest_outcome_blocked">Blocked</string>
+    <string name="selftest_outcome_leaked">Leaked</string>
+    <string name="selftest_outcome_inconclusive">Cannot determine</string>
+    <string name="selftest_outcome_skipped">Not tested</string>
+    <string name="selftest_outcome_pending">Waiting for you</string>
+
+    <string name="selftest_browser_prompt">Nullroute cannot see what another app\'s network stack did — no app can. Open the domain in your browser, then tell it what you saw.</string>
+    <string name="selftest_browser_open">Open it in the browser</string>
+    <string name="selftest_browser_blocked">It did not load</string>
+    <string name="selftest_browser_loaded">It loaded</string>
+    <string name="selftest_browser_reported_blocked">You reported that it did not load. Recorded as your observation, not as a measurement — a site can fail to load for reasons that have nothing to do with filtering.</string>
+    <string name="selftest_browser_reported_leaked">You reported that it loaded, so your browser resolved a domain the index blocks. If Deep mode is off, turning it on is the fix for the plaintext case.</string>
+    <string name="selftest_browser_no_app">No app on this device handles web links, so there is nothing to open.</string>
+
+    <string name="selftest_summary_header">What this means</string>
+    <string name="selftest_summary_all_blocked">Every lane this test can measure refused the domain.</string>
+    <plurals name="selftest_summary_leaks">
+        <item quantity="one">%1$d lane resolved a domain your blocklist blocks.</item>
+        <item quantity="other">%1$d lanes resolved a domain your blocklist blocks.</item>
+    </plurals>
+    <string name="selftest_summary_none">Nothing could be measured, so this test proves nothing either way.</string>
+    <string name="selftest_summary_deep_off">Deep mode is off. The in-app browser lane is exactly what Deep mode exists to cover — that is the switch to try if it leaked.</string>
+    <string name="selftest_summary_deep_on">Deep mode is on, so the browser lanes were going through Nullroute\'s tunnel when this ran.</string>
+    <string name="selftest_summary_not_enforcing">Filtering is paused or off, so a leak below is the expected result and proves nothing about your blocklist.</string>
+
+    <string name="selftest_caveat_header">What this test cannot see</string>
+    <string name="selftest_caveat">A blocked result in every lane does not mean everything is blocked. Deep mode cannot touch an app that speaks encrypted DNS to an address built into the app, because there is no name for Nullroute to read and no lookup to answer. It cannot block ads served from the same domain as the content, and it filters nothing while another VPN holds the slot. This test measures three lanes on one domain; it is evidence, not a guarantee.</string>
+
+    <!--
+        Per-lane detail. Each of these is the EVIDENCE for the one-word outcome
+        beside it, so each says what was observed rather than what it means:
+        "the resolver returned 142.250.x.x" and not "not protected".
+    -->
+    <string name="selftest_detail_system_nxdomain">The system resolver refused the name outright, which is what a blocked domain looks like from an app.</string>
+    <string name="selftest_detail_system_sinkhole">The system resolver answered %1$s — the sinkhole address, not a real server.</string>
+    <string name="selftest_detail_system_leak">The system resolver returned %1$s, a real address. %2$s</string>
+    <string name="selftest_detail_expected_nxdomain">A blocked name should have been refused on this device.</string>
+    <string name="selftest_detail_expected_sinkhole">A blocked name should have been answered with the sinkhole address on this device.</string>
+    <string name="selftest_detail_system_skipped">Filtering is %1$s, so this lane was not tested. A leak while filtering is switched off proves nothing about your blocklist.</string>
+    <string name="selftest_detail_system_exempt">Nullroute\'s own app is exempt from filtering on this device, so a lookup from inside it could not have been blocked. Nothing is wrong; this lane simply cannot measure anything from here.</string>
+    <string name="selftest_detail_system_error">The lookup failed for a reason that is not a block: %1$s</string>
+
+    <!--
+        The control. A phone with no working DNS fails every lookup, which is
+        indistinguishable from blocking everything — so when the control name
+        cannot be resolved either, the honest report is that nothing was measured.
+    -->
+    <string name="selftest_detail_no_dns">This device could not resolve %1$s either, and that domain is not on your blocklist. Nothing here is being blocked; DNS is not working at all right now, so the test cannot tell you anything.</string>
+
+    <string name="selftest_detail_webview_hostlookup">The in-app browser could not resolve the name. Note that this does not say which layer refused it — Deep mode, the built-in hosts list, or Chromium falling back to the system resolver would all look like this.</string>
+    <string name="selftest_detail_webview_loaded">The page loaded, so the in-app browser resolved a domain your blocklist blocks. This is the Chrome bypass, measured on your device.</string>
+    <string name="selftest_detail_webview_connect">The name resolved and the connection then failed (error %1$d). The leak is the resolution succeeding; what happened after it is not filtering.</string>
+    <string name="selftest_detail_webview_connect_sinkhole">The connection failed (error %1$d). Blocked names are answered with a sinkhole address on this device, and a sinkhole is indistinguishable from an unreachable server from here, so this cannot be called either way.</string>
+    <string name="selftest_detail_webview_timeout">Nothing came back within %1$d seconds. A slow network is not evidence of blocking.</string>
+    <string name="selftest_detail_webview_other">The in-app browser failed with error %1$d, which does not say whether the name resolved.</string>
+    <string name="selftest_detail_webview_unavailable">This device has no usable WebView, so this lane could not run: %1$s</string>
+
+    <string name="selftest_mode_enforce">on</string>
+    <string name="selftest_mode_paused">paused</string>
+    <string name="selftest_mode_off">off</string>
+    <string name="selftest_mode_killed">disabled by the kill switch</string>
+    <string name="selftest_mode_unknown">in an unknown state</string>
+
+    <string name="selftest_resp_noname">refused (NXDOMAIN)</string>
+    <string name="selftest_resp_nodata">answered with no address (NODATA)</string>
+    <string name="selftest_resp_sinkhole">answered with a sinkhole address</string>
+    <string name="selftest_resp_unknown">unknown — the control page could not be read</string>
+
+    <string name="selftest_context_header">Conditions when this ran</string>
+    <string name="selftest_context_mode">Filter mode: %1$s</string>
+    <string name="selftest_context_response">Answer for a blocked name: %1$s</string>
+    <string name="selftest_context_deep">Deep mode: %1$s</string>
+    <string name="selftest_context_on">on</string>
+    <string name="selftest_context_off">off</string>
+
+</resources>

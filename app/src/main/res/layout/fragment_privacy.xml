@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Privacy and retention.
+
+    The storage statement is first and unconditional. Everything below it is a
+    control over data that only exists because the user allowed it to.
+-->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            style="@style/Nullroute.CardTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/priv_title" />
+
+        <TextView
+            style="@style/Nullroute.Body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/priv_storage_note" />
+
+        <TextView
+            style="@style/Nullroute.CardTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="@string/priv_log_header" />
+
+        <TextView
+            style="@style/Nullroute.Body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/priv_log_note" />
+
+        <RadioGroup
+            android:id="@+id/priv_mode_group"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="vertical">
+
+            <RadioButton
+                android:id="@+id/priv_mode_off"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/log_mode_off" />
+
+            <RadioButton
+                android:id="@+id/priv_mode_blocked"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/log_mode_blocked" />
+
+            <RadioButton
+                android:id="@+id/priv_mode_all"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/log_mode_all" />
+
+            <TextView
+                style="@style/Nullroute.Caption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="32dp"
+                android:textColor="@color/nr_status_warn"
+                android:text="@string/log_mode_all_warning" />
+        </RadioGroup>
+
+        <TextView
+            style="@style/Nullroute.CardTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="@string/priv_retention_header" />
+
+        <RadioGroup
+            android:id="@+id/priv_days_group"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="vertical">
+
+            <RadioButton
+                android:id="@+id/priv_days_1"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/priv_days_1" />
+
+            <RadioButton
+                android:id="@+id/priv_days_7"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/priv_days_7" />
+
+            <RadioButton
+                android:id="@+id/priv_days_30"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/priv_days_30" />
+
+            <RadioButton
+                android:id="@+id/priv_days_90"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/priv_days_90" />
+        </RadioGroup>
+
+        <TextView
+            android:id="@+id/priv_retention_note"
+            style="@style/Nullroute.Caption"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            android:id="@+id/priv_stats"
+            style="@style/Nullroute.Body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/priv_purge"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/priv_purge" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/priv_clear"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/log_clear" />
+
+        <TextView
+            android:id="@+id/priv_status"
+            style="@style/Nullroute.Body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:visibility="gone" />
+
+    </LinearLayout>
+</ScrollView>

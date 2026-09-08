@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Settings.
+
+    Every option that can break something carries its consequence inline rather
+    than behind an info icon: these are three-line explanations, and a user who
+    has to tap to find out what a setting does will not tap.
+-->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            style="@style/Nullroute.CardTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/sett_response_header" />
+
+        <TextView
+            style="@style/Nullroute.Body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/sett_response_note" />
+
+        <RadioGroup
+            android:id="@+id/sett_resp_group"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="vertical">
+
+            <RadioButton
+                android:id="@+id/sett_resp_noname"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/sett_resp_noname" />
+
+            <TextView
+                style="@style/Nullroute.Caption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="32dp"
+                android:layout_marginBottom="8dp"
+                android:text="@string/sett_resp_noname_detail" />
+
+            <RadioButton
+                android:id="@+id/sett_resp_nodata"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/sett_resp_nodata" />
+
+            <TextView
+                style="@style/Nullroute.Caption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="32dp"
+                android:layout_marginBottom="8dp"
+                android:text="@string/sett_resp_nodata_detail" />
+
+            <RadioButton
+                android:id="@+id/sett_resp_sinkhole"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/sett_resp_sinkhole" />
+
+            <!-- The 0.0.0.0 trap, spelled out where the option is, not in a
+                 help page nobody opens. -->
+            <TextView
+                style="@style/Nullroute.Caption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="32dp"
+                android:textColor="@color/nr_status_warn"
+                android:text="@string/sett_resp_sinkhole_detail" />
+        </RadioGroup>
+
+        <TextView
+            android:id="@+id/sett_status"
+            style="@style/Nullroute.Body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:visibility="gone" />
+
+        <TextView
+            style="@style/Nullroute.CardTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="@string/sett_updates_header" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/sett_auto_update"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/sett_auto_update" />
+
+        <TextView
+            style="@style/Nullroute.Caption"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/sett_auto_update_detail" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/sett_unmetered"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/sett_unmetered" />
+
+        <TextView
+            style="@style/Nullroute.Caption"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/sett_unmetered_detail" />
+
+        <!-- The scheduler's answer, not the preference's. -->
+        <TextView
+            android:id="@+id/sett_schedule_state"
+            style="@style/Nullroute.Body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/sett_update_now"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/sett_update_now" />
+
+        <TextView
+            style="@style/Nullroute.CardTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="@string/sett_more_header" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/sett_privacy"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/sett_privacy_button" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/sett_tile"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/sett_tile_button" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/sett_intro"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/sett_intro_button" />
+
+        <TextView
+            style="@style/Nullroute.Caption"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/sett_scope_note" />
+
+    </LinearLayout>
+</ScrollView>
