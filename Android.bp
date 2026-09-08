@@ -1,0 +1,593 @@
+//
+// Nullroute — every Soong module in this repository.
+//
+// The repo is dropped into the tree at packages/apps/Nullroute/. It builds four
+// distinct kinds of artefact out of one source root:
+//
+//   1. libnrformat_headers  — the ON-DISK FORMAT, consumed by BOTH this repo and
+//                             packages/modules/DnsResolver. It is a header_libs
+//                             dependency there, never a copied file (F10).
+//   2. libnrfilter          — the matcher, whole-static-linked into libnetd_resolv
+//                             and therefore built for the com.android.tethering
+//                             APEX variant as well as the platform variant.
+//   3. host/system_ext tools — nrctl, nullroute_seed, the fuzzers, the host test.
+//   4. the app + its ROM configuration prebuilts.
+//
+// Two facts about this tree drive the apex_available lists below and are NOT
+// negotiable (see docs-ground-truth.md §5):
+//   * libnetd_resolv lives in packages/modules/DnsResolver and ships inside
+//     **com.android.tethering**, not com.android.resolv. Anything the resolver
+//     links must be apex_available to com.android.tethering or Soong rejects it.
+//   * That APEX's min_sdk is 30, and libnetd_resolv carries
+//     min_sdk_version: "apex_inherit", so our APEX-visible modules pin 30.
+//
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+// ---------------------------------------------------------------------------
+// Shared on-disk format
+// ---------------------------------------------------------------------------
+
+// THE single source of truth for NRDX / NrControl / NrRing. The resolver picks
+// this up with `header_libs: ["libnrformat_headers"]`; there is deliberately no
+// second copy under packages/modules/DnsResolver, because two "byte-identical"
+// headers drift the first time one repo is rebased and not the other, and the
+// failure mode is a silently mis-parsed index inside netd (F10).
+cc_library_headers {
+    name: "libnrformat_headers",
+    export_include_dirs: ["native/include"],
+    host_supported: true,
+    apex_available: [
+        "//apex_available:platform",
+        "com.android.tethering",
+    ],
+    min_sdk_version: "30",
+}
+
+// ---------------------------------------------------------------------------
+// The matcher — runs inside netd
+// ---------------------------------------------------------------------------
+
+// NOTE: no system_ext_specific. A cc_library_static is never installed, so a
+// partition attribute on it is meaningless and Soong will not honour it (F4).
+//
+// Exceptions and RTTI are off because this code runs in netd's DNS hot path and
+// netd's init stanza carries `onrestart restart zygote` — an abort here is a UI
+// loop, not a network outage (F7). Every failure path in NrMap falls OPEN.
+cc_library_static {
+    name: "libnrfilter",
+    srcs: [
+        "native/NrCanon.cpp",
+        "native/NrQuery.cpp",
+        "native/NrMap.cpp",
+    ],
+    // host_supported so the two cc_fuzz modules below can build a host variant.
+    // Without it Soong fails with "missing variant" the moment either fuzzer is
+    // analysed, and the F7 merge gate is what those fuzzers exist to be. NrMap.cpp
+    // is plain POSIX (open/fstat/mmap/clock_gettime) so the host variant is real
+    // code, not a stub — the host fuzzer exercises the same validate-and-map path
+    // that runs inside netd.
+    host_supported: true,
+    header_libs: ["libnrformat_headers"],
+    export_header_lib_headers: ["libnrformat_headers"],
+    shared_libs: ["liblog"],
+    cflags: [
+        "-O2",
+        "-fno-exceptions",
+        "-fno-rtti",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+    apex_available: [
+        "//apex_available:platform",
+        "com.android.tethering",
+    ],
+    min_sdk_version: "30",
+}
+
+// ---------------------------------------------------------------------------
+// Builder / CLI / JNI side — app process only, never netd
+// ---------------------------------------------------------------------------
+
+// NrBuilder.cpp carries the line parser and the suffix collapse as well as the
+// serializer; they are one translation unit on purpose so that nrtest can build
+// the exact bytes the device will map, with no second code path.
+//
+// Exceptions stay ENABLED here (unlike libnrfilter): this side allocates freely
+// while merging hundreds of thousands of entries, and a std::bad_alloc that
+// unwinds out of a build job is far better than an abort in the app process.
+// FILE NAMES: the implementation of native/include/NrCtl.h is NrCtlCore.cpp, not
+// NrCtl.cpp. `native/NrCtl.cpp` and `native/nrctl.cpp` differ only in case and so
+// cannot coexist in a checkout on a case-insensitive filesystem; Soong does not
+// care, a developer whose checkout silently loses one of the two very much does.
+//
+// NrStrings.cpp (SPEC §5, the front-coded NR_SEC_STR rule-text blob) is NOT
+// listed: it does not exist yet and nothing in native/include declares anything
+// from it. Add it back to this list in the same commit that adds the file —
+// a src that does not exist is a hard Soong error on EVERY `mka`, including
+// `mka Nullroute`, not just on the module that names it.
+cc_library_static {
+    name: "libnrcore",
+    srcs: [
+        // NrBuilder.cpp is the serializer only. The line parser (NrParse.cpp),
+        // the suffix collapse (NrCollapse.cpp) and the UI-only front-coded rule
+        // text (NrStrings.cpp) are separate translation units so each can be
+        // reasoned about, timed and fuzzed without the others around it.
+        "native/NrParse.cpp",
+        "native/NrCollapse.cpp",
+        "native/NrStrings.cpp",
+        "native/NrBuilder.cpp",
+        "native/NrRingReader.cpp",
+        // The implementation of native/include/NrCtl.h is NrCtlCore.cpp, not
+        // NrCtl.cpp: `native/NrCtl.cpp` and `native/nrctl.cpp` differ only in
+        // case and cannot coexist in a checkout on a case-insensitive
+        // filesystem. Soong does not care; a developer whose checkout silently
+        // loses one of the two very much does.
+        "native/NrCtlCore.cpp",
+    ],
+    static_libs: ["libnrfilter"],
+    header_libs: ["libnrformat_headers"],
+    export_header_lib_headers: ["libnrformat_headers"],
+    shared_libs: [
+        "liblog",
+        "libz",
+    ],
+    cflags: [
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+}
+
+cc_binary {
+    name: "nrctl",
+    srcs: ["native/nrctl.cpp"],
+    static_libs: ["libnrcore"],
+    shared_libs: [
+        "libbase",
+        "liblog",
+        "libz",
+    ],
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+    system_ext_specific: true,
+}
+
+// Runs at post-fs-data in its own SELinux domain. liblzma decompresses the baked
+// baseline on first boot.
+//
+// NOT libcrypto: nr_sha256() is a self-contained implementation in NrCtlCore.cpp
+// (nr_sha256_selftest() is its KAT), so the seeder does not pull BoringSSL into a
+// boot-path binary. If a future change does need it, add it here — do not assume
+// it is already linked because an older comment said so.
+cc_binary {
+    name: "nullroute_seed",
+    srcs: ["native/nullroute_seed.cpp"],
+    static_libs: ["libnrcore"],
+    shared_libs: [
+        "libbase",
+        "liblog",
+        "liblzma",
+        "libz",
+    ],
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+    system_ext_specific: true,
+}
+
+// Deliberately NO sdk_version. This .so is bundled inside a platform-signed app
+// and must be able to link the platform-variant static libs above; declaring an
+// sdk_version would force an NDK variant and Soong would reject the dependency
+// on libnrcore/libnrfilter (F3).
+// jni_headers is required explicitly: <jni.h> has not been on the implicit
+// platform include path since it moved into libnativehelper's exported
+// `jni_headers` header library, and the failure is a compile error in a module
+// that "obviously" builds. Harmless if this tree still exports it globally.
+cc_library_shared {
+    name: "libnrjni",
+    srcs: [
+        "native/jni_bridge.cpp",
+        // Deep mode is in the SAME library on purpose: it must reach the same
+        // nr_evaluate() the resolver hook reaches, out of the same libnrcore, or
+        // the tunnel and the hook can disagree about a domain.
+        "native/jni_deep.cpp",
+    ],
+    static_libs: ["libnrcore"],
+    header_libs: ["jni_headers"],
+    shared_libs: [
+        "liblog",
+        "libz",
+    ],
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+}
+
+// ---------------------------------------------------------------------------
+// Test and fuzz — the fuzzers are a merge gate (F7)
+// ---------------------------------------------------------------------------
+
+// Host-only, and it takes a corpus path on argv, so it is a cc_binary rather
+// than a cc_test: `nrtest prebuilt/corpus/hagezi-pro.txt`. It links the sources
+// directly instead of libnrfilter because NrMap.cpp is device-only (mmap +
+// __system_property_set), and the matcher semantics are what this asserts.
+cc_binary_host {
+    name: "nrtest",
+    srcs: [
+        "native/NrCanon.cpp",
+        "native/NrQuery.cpp",
+        "native/NrParse.cpp",
+        "native/NrCollapse.cpp",
+        "native/NrStrings.cpp",
+        "native/NrBuilder.cpp",
+        "native/nrtest.cpp",
+    ],
+    header_libs: ["libnrformat_headers"],
+    cflags: [
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+}
+
+cc_fuzz {
+    name: "nr_hostname_fuzzer",
+    srcs: ["native/fuzz/nr_hostname_fuzzer.cpp"],
+    static_libs: ["libnrfilter"],
+    header_libs: ["libnrformat_headers"],
+    host_supported: true,
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+}
+
+cc_fuzz {
+    name: "nr_index_fuzzer",
+    srcs: ["native/fuzz/nr_index_fuzzer.cpp"],
+    static_libs: ["libnrfilter"],
+    header_libs: ["libnrformat_headers"],
+    host_supported: true,
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+}
+
+// The one that matters most. nr_wire.h parses attacker-shaped DNS wire data
+// inside netd for the H3 raw-query hook, and netd's init stanza carries
+// `onrestart restart zygote` — so a parser bug here is a boot loop, not a failed
+// lookup. Header-only and dependency-free, hence no static_libs.
+cc_fuzz {
+    name: "nr_wire_fuzzer",
+    srcs: ["native/fuzz/nr_wire_fuzzer.cpp"],
+    header_libs: ["libnrformat_headers"],
+    include_dirs: ["packages/apps/Nullroute/resolver-patch/nullroute"],
+    host_supported: true,
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+}
+
+// ---------------------------------------------------------------------------
+// The app
+// ---------------------------------------------------------------------------
+
+// AGP >= 8 rejects package= in the source manifest; Soong's manifest merger
+// requires it and manifest_fixer.py has no --package flag. Same trick as
+// packages/apps/Freezer. The `0,/<manifest/` range restricts the substitution
+// to the first match and tolerates a manifest whose attributes start on the
+// following line; the trailing grep turns a silently unmatched sed into a build
+// failure instead of an aapt2 error three minutes later.
+genrule {
+    name: "nullroute_soong_manifest",
+    srcs: ["app/src/main/AndroidManifest.xml"],
+    out: ["AndroidManifest.xml"],
+    cmd: "sed -e '0,/<manifest/ s|<manifest|<manifest package=\"com.bestrom.nullroute\"|' $(in) > $(out) && " +
+        "grep -q 'package=\"com.bestrom.nullroute\"' $(out)",
+}
+
+android_app {
+    name: "Nullroute",
+    srcs: ["app/src/main/java/**/*.kt"],
+    resource_dirs: ["app/src/main/res"],
+    manifest: ":nullroute_soong_manifest",
+
+    // system_current, not platform_apis: nothing here needs an @hide API (the
+    // privileged surface is file I/O, PackageManager, JobScheduler and
+    // VpnService), and it keeps `./gradlew :app:assembleDebug` usable both as a
+    // 20-second compile check and as the stock-Android Deep-mode variant.
+    sdk_version: "system_current",
+
+    // Higher than the sibling Freezer app's 33 on purpose: the nrctl privilege
+    // gate depends on BroadcastReceiver.getSentFromUid(), which is API 34+, and
+    // this APK only ever runs on the image it ships in. Lowering it would need
+    // @RequiresApi guards around the one API that makes the gate not-a-no-op (F2).
+    min_sdk_version: "36",
+
+    certificate: "platform",
+    privileged: true,
+    system_ext_specific: true,
+    jni_libs: ["libnrjni"],
+
+    static_libs: [
+        "androidx.core_core-ktx",
+        "androidx.appcompat_appcompat",
+        "androidx.recyclerview_recyclerview",
+        "androidx.preference_preference",
+        "androidx.lifecycle_lifecycle-runtime-ktx",
+        "com.google.android.material_material",
+
+        // Only add these once `mka Nullroute` proves they resolve in THIS tree.
+        // SettingsLib supplies Theme.SubSettingsBase.Expressive for the
+        // Network & internet entry point, but in several trees it is only
+        // linkable from a platform_apis module; org.lineageos.settings.resources
+        // does not exist in every BestROM sync. Neither is needed to build or
+        // run the filter — they are theming only.
+        //   "SettingsLib",
+        //   "org.lineageos.settings.resources",
+    ],
+
+    // androidx.preference and Material inflate views by reflection from XML;
+    // R8 without a hand-written keep set silently strips them.
+    optimize: {
+        enabled: false,
+    },
+
+    required: [
+        "privapp_whitelist_com.bestrom.nullroute",
+        "nullroute_gid_permissions",
+        "preinstalled-packages-platform-nullroute",
+        "sysconfig-nullroute",
+        "default-permissions-nullroute",
+        "init.nullroute.rc",
+        "nullroute_etc_hosts",
+        "nullroute_baseline_domains",
+        "nullroute_baseline_domains_sha256",
+        "nullroute_neverblock",
+        "nullroute_antifraud",
+        "nullroute_attribution",
+        "nullroute_profile_lite",
+        "nullroute_profile_balanced",
+        "nullroute_profile_aggressive",
+    ],
+}
+
+// ---------------------------------------------------------------------------
+// NO QS-tile RRO. This is a deliberate removal, not an omission.
+// ---------------------------------------------------------------------------
+//
+// SPEC §8.8 item 29 asks for a runtime_resource_overlay that adds the tile
+// ComponentName to `config_defaultQuickSettingsTiles` on `android`. Three things
+// are wrong with that as written and the third is the one that matters:
+//
+//   1. There is no `config_defaultQuickSettingsTiles`. The default tile list is
+//      `R.string.quick_settings_tiles_default`.
+//   2. It does not live in package `android`; it is a SystemUI resource, so the
+//      overlay would have to target `com.android.systemui`. An RRO pointed at
+//      the wrong target package installs, validates and changes nothing — a
+//      silent no-op, which is the failure class this project exists to avoid.
+//   3. That resource is a single flat comma-separated string with no append
+//      mechanism. Overlaying it means hardcoding this ROM's entire default tile
+//      list in our repo. The next time Lineage adds or reorders a default tile,
+//      our copy silently wins and the user loses that tile — on a fresh flash
+//      only, so it would never reproduce on a developer's dirty device.
+//
+// The cost of not shipping it is small and bounded: a TileService with the
+// QS_TILE intent-filter is already enumerated in the QS edit tray with no
+// configuration at all, and the app can offer one-tap placement from its own UI
+// with TileService.requestAddTileService() (API 33+). Do that instead of
+// reinstating the overlay.
+
+// ---------------------------------------------------------------------------
+// Licensing of the baked list data
+// ---------------------------------------------------------------------------
+//
+// The package default above is Apache-2.0, which is correct for the code and for
+// the curated files we wrote (neverblock/antifraud/attribution and the profile
+// files carry URLs and our own domain selections). It is NOT correct for the two
+// artefacts derived from third-party lists: `prebuilt/hosts` and
+// `prebuilt/baseline.domains.xz` are built from AdAway (CC BY 3.0) and
+// StevenBlack (MIT) — see prebuilt/README.md §1.1. CC BY 3.0 is an attribution
+// licence, and the mechanism that discharges attribution on an Android image is
+// the generated NOTICE, which is fed from exactly this metadata. Labelling those
+// two files Apache-2.0 would drop AdAway from the NOTICE while everything still
+// builds and ships.
+//
+// No copyleft source is baked: gen_l0_hosts.py's assert_permissive() fails the
+// build on a GPL/MPL source, and the GPL-3.0 lists (HaGeZi, r-a-y) are fetched
+// and compiled ON DEVICE (SPEC §7.6, §10.5).
+//
+// If this tree's build/soong/licenses/Android.bp lacks the 3.0-specific kind,
+// fall back to "SPDX-license-identifier-CC-BY"; do not fall back to Apache-2.0.
+license {
+    name: "nullroute_baked_lists_license",
+    package_name: "Nullroute baked blocklist data",
+    license_kinds: [
+        "SPDX-license-identifier-CC-BY-3.0",
+        "SPDX-license-identifier-MIT",
+    ],
+    license_text: ["prebuilt/README.md"],
+}
+
+// ---------------------------------------------------------------------------
+// L0 — the baked hosts floor
+// ---------------------------------------------------------------------------
+
+// NOT system_ext_specific: _PATH_HOSTS is the hardcoded literal
+// "/system/etc/hosts" (bionic/libc/include/netdb.h:73), so this has to land on
+// /system. `overrides` displaces the stock `etc_hosts` module from
+// system/core/rootdir/Android.bp. Spike 6 in SPEC.md §10.6 exists because an
+// override across a module boundary is worth proving before relying on it; the
+// PRODUCT_COPY_FILES fallback is written out in rom/nullroute.mk.
+prebuilt_etc {
+    name: "nullroute_etc_hosts",
+    src: "prebuilt/hosts",
+    filename: "hosts",
+    overrides: ["etc_hosts"],
+    licenses: ["nullroute_baked_lists_license"],
+}
+
+// ---------------------------------------------------------------------------
+// ROM configuration prebuilts — /system_ext
+// ---------------------------------------------------------------------------
+
+// ⚠ Under ro.control_privapp_permissions=enforce (every user build), any
+// signature|privileged permission present in the manifest but missing from this
+// file ABORTS BOOT. Over-listing is inert; under-listing bricks.
+prebuilt_etc {
+    name: "privapp_whitelist_com.bestrom.nullroute",
+    system_ext_specific: true,
+    sub_dir: "permissions",
+    src: "rom/privapp-permissions-com.bestrom.nullroute.xml",
+    filename_from_src: true,
+}
+
+// The permission -> gid mapping that gets the app into group misc (AID 9998)
+// without android:sharedUserId="android.uid.system". See SPEC.md §8.7.
+prebuilt_etc {
+    name: "nullroute_gid_permissions",
+    system_ext_specific: true,
+    sub_dir: "permissions",
+    src: "rom/nullroute-gid.xml",
+    filename_from_src: true,
+}
+
+prebuilt_etc {
+    name: "preinstalled-packages-platform-nullroute",
+    system_ext_specific: true,
+    sub_dir: "sysconfig",
+    src: "rom/preinstalled-packages-platform-nullroute.xml",
+    filename_from_src: true,
+}
+
+prebuilt_etc {
+    name: "sysconfig-nullroute",
+    system_ext_specific: true,
+    sub_dir: "sysconfig",
+    src: "rom/sysconfig-nullroute.xml",
+    filename_from_src: true,
+}
+
+prebuilt_etc {
+    name: "default-permissions-nullroute",
+    system_ext_specific: true,
+    sub_dir: "default-permissions",
+    src: "rom/default-permissions-nullroute.xml",
+    filename_from_src: true,
+}
+
+// init parses /system_ext/etc/init/ unconditionally, so shipping the .rc as a
+// prebuilt_etc needs no device-tree change and no vendor init edit.
+prebuilt_etc {
+    name: "init.nullroute.rc",
+    system_ext_specific: true,
+    sub_dir: "init",
+    src: "rom/init.nullroute.rc",
+    filename_from_src: true,
+}
+
+// ---------------------------------------------------------------------------
+// Baked list data — /system_ext/etc/nullroute
+// ---------------------------------------------------------------------------
+//
+// Only MIT / CC BY 3.0 / Unlicense material is baked into the signed image.
+// GPL-3.0 and MPL-2.0 sources are fetched and compiled ON DEVICE at first sync
+// (SPEC.md §7.6, §10.5) so the derivative work is created by the user rather
+// than distributed inside a verity-protected image. The profile files below
+// carry URLs, never list content.
+
+// ⚠ GENERATED ARTEFACT. Regenerate with tools/gen_baseline.py whenever the source
+// catalogue changes; Soong resolves `src:` at analysis time, so if it is ever
+// deleted EVERY `mka` in this repo fails, not just this module.
+prebuilt_etc {
+    name: "nullroute_baseline_domains",
+    system_ext_specific: true,
+    sub_dir: "nullroute",
+    src: "prebuilt/baseline.domains.xz",
+    filename: "baseline.domains.xz",
+    licenses: ["nullroute_baked_lists_license"],
+}
+
+// The sidecar is NOT optional decoration. nullroute_seed's load_baseline() reads
+// <baseline>.sha256 and refuses to compile anything on a mismatch — but only *if
+// the file is there*. Ship the .xz without it and the integrity check that
+// gen_baseline.py went to the trouble of emitting silently degrades to "trust
+// whatever bytes are on the partition", with nothing anywhere to say so. These
+// two modules are a pair; never add one without the other.
+prebuilt_etc {
+    name: "nullroute_baseline_domains_sha256",
+    system_ext_specific: true,
+    sub_dir: "nullroute",
+    src: "prebuilt/baseline.domains.xz.sha256",
+    filename: "baseline.domains.xz.sha256",
+    licenses: ["nullroute_baked_lists_license"],
+}
+
+// The ALLOW_FORCE floor, compiled into every index the builder produces. A
+// blocklist that swallows a captive-portal or push endpoint is the failure this
+// file exists to make impossible.
+prebuilt_etc {
+    name: "nullroute_neverblock",
+    system_ext_specific: true,
+    sub_dir: "nullroute",
+    src: "prebuilt/neverblock.txt",
+    filename_from_src: true,
+}
+
+prebuilt_etc {
+    name: "nullroute_antifraud",
+    system_ext_specific: true,
+    sub_dir: "nullroute",
+    src: "prebuilt/antifraud.txt",
+    filename_from_src: true,
+}
+
+prebuilt_etc {
+    name: "nullroute_attribution",
+    system_ext_specific: true,
+    sub_dir: "nullroute",
+    src: "prebuilt/attribution.txt",
+    filename_from_src: true,
+}
+
+prebuilt_etc {
+    name: "nullroute_profile_lite",
+    system_ext_specific: true,
+    sub_dir: "nullroute/profiles",
+    src: "prebuilt/profiles/lite.txt",
+    filename_from_src: true,
+}
+
+prebuilt_etc {
+    name: "nullroute_profile_balanced",
+    system_ext_specific: true,
+    sub_dir: "nullroute/profiles",
+    src: "prebuilt/profiles/balanced.txt",
+    filename_from_src: true,
+}
+
+prebuilt_etc {
+    name: "nullroute_profile_aggressive",
+    system_ext_specific: true,
+    sub_dir: "nullroute/profiles",
+    src: "prebuilt/profiles/aggressive.txt",
+    filename_from_src: true,
+}

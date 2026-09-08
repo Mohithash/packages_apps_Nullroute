@@ -1,0 +1,41 @@
+# Nullroute dependency catalogue.
+#
+# Every entry here must have a counterpart in the Soong `static_libs` list in
+# Android.bp, because the shipping build resolves these from the tree's
+# prebuilts/sdk, not from Maven. Adding a library here that the tree has no
+# prebuilt for produces an app that builds in Android Studio and fails `mka`.
+#
+# Soong module            -> Maven coordinate
+#   androidx.core_core-ktx                    androidx.core:core-ktx
+#   androidx.appcompat_appcompat              androidx.appcompat:appcompat
+#   androidx.recyclerview_recyclerview        androidx.recyclerview:recyclerview
+#   androidx.preference_preference            androidx.preference:preference
+#   androidx.lifecycle_lifecycle-runtime-ktx  androidx.lifecycle:lifecycle-runtime-ktx
+#   com.google.android.material_material      com.google.android.material:material
+#
+# NOT present, and must never be introduced: androidx.datastore (not DE-safe and
+# no tree prebuilt), kotlinx-coroutines (no tree prebuilt for a system_ext app),
+# okhttp (HttpURLConnection is in the platform), androidx.work (§6.5 — plain
+# JobScheduler, we are already allow-in-power-save).
+
+[versions]
+agp = "8.7.2"
+kotlin = "2.0.21"
+coreKtx = "1.15.0"
+appcompat = "1.7.0"
+recyclerview = "1.3.2"
+preference = "1.2.1"
+lifecycleRuntimeKtx = "2.8.7"
+material = "1.12.0"
+
+[libraries]
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+androidx-recyclerview = { group = "androidx.recyclerview", name = "recyclerview", version.ref = "recyclerview" }
+androidx-preference = { group = "androidx.preference", name = "preference", version.ref = "preference" }
+androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }
+material = { group = "com.google.android.material", name = "material", version.ref = "material" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
