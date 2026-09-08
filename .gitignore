@@ -1,4 +1,8 @@
-build/
+# Anchored: an unanchored "build/" also matches the Kotlin package at
+# app/src/main/java/com/bestrom/nullroute/build, which git then refuses to
+# track and which then looks like source that was never written.
+/build/
+/app/build/
 .gradle/
 .idea/
 local.properties

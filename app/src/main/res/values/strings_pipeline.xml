@@ -78,4 +78,12 @@
     <string name="pipeline_source_unchanged">unchanged</string>
     <string name="pipeline_source_cached">using the cached copy</string>
 
+    <!--
+        The step line at the end of a run. IndexBuilder builds these with a
+        Context and carries the finished text on the Outcome, because message()
+        is called from places that have no Context of their own.
+    -->
+    <string name="pipeline_outcome_uptodate">Already up to date.</string>
+    <string name="pipeline_outcome_updated">Updated — %1$d domains blocked.</string>
+
 </resources>
