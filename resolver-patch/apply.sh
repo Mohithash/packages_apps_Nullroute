@@ -21,16 +21,18 @@
 #      patch is the failure mode this project can least afford, because it
 #      compiles.
 #
-# H3 is the one hunk that is allowed to be absent. `android.net.DnsResolver`'s
-# raw-query path did not always exist and a fork is free not to carry it, so H3
-# is located independently and REPORTED AS SKIPPED rather than failing the run —
-# H1, H2 and H4 cover ~99% of traffic and must never be held hostage to it.
+# H3 and H5 are allowed to be absent. `android.net.DnsResolver`'s raw-query path
+# did not always exist and a fork is free not to carry it; H5 anchors on a CALL
+# rather than on a function's opening brace, which is the least stable kind of
+# anchor there is. Both are therefore located independently and REPORTED AS
+# SKIPPED rather than failing the run — H1, H2 and H4 cover ~99% of traffic and
+# must never be held hostage to either.
 set -euo pipefail
 
 BEGIN_MARK='// NULLROUTE-BEGIN'
 END_MARK='// NULLROUTE-END'
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SRC_FILES="NrFilter.h NrFilter.cpp nr_hook.h NrRingWriter.cpp NrResSend.cpp nr_wire.h"
+SRC_FILES="NrFilter.h NrFilter.cpp nr_hook.h NrRingWriter.cpp NrResSend.cpp nr_wire.h NrCname.h NrCname.cpp"
 
 MODE=apply
 case "${1:-}" in
@@ -381,16 +383,118 @@ else
              android.net.DnsResolver.rawQuery(), which no longer sees a verdict."
 fi
 
+# ---------------------------------------------------------------------------
+# H5 — CNAME uncloaking (Phase 5). OPTIONAL: skipped, never fatal.
+#
+# H1/H2/H3 all decide on the QUESTION. A CNAME-cloaked tracker is served under a
+# first-party name that no blocklist can carry, and names itself only in the
+# ANSWER — so this is the one hook that has to read a reply.
+#
+# The anchor is the getanswer() CALL inside dns_getaddrinfo(), not a function's
+# opening brace, because that is the only point in the tree where the answer
+# bytes and netcontext->uid are both in scope. Without the uid there is no
+# per-app policy, and an EXEMPT app would silently have its answers dropped —
+# which is exactly the kind of quiet wrongness this patch is written to avoid.
+#
+# getanswer() itself is the wrong seam for the same reason: it is `static` and
+# takes no uid, so a hunk there could only enforce a device-wide policy while
+# looking like it enforced the user's.
+#
+# gethnamaddr.cpp's own getanswer() is deliberately NOT hooked. It serves the
+# legacy gethostbyname path, and doubling this hunk's surface to reach it is a
+# bad trade for a path H2 already covers at the question.
+# ---------------------------------------------------------------------------
+H5_ON=0
+H5_SKIP=""
+H5_OBJ=""
+
+h5_locate() {
+    local def sig brace calls line
+
+    def="$(try_body_definition "$GAI" 'int' 'dns_getaddrinfo' || true)"
+    if [ -z "$def" ]; then
+        H5_SKIP="no single body-carrying definition of dns_getaddrinfo() found"
+        return 1
+    fi
+    brace="$(printf '%s' "$def" | cut -d: -f2)"
+    sig="$(printf '%s' "$def" | cut -d: -f4-)"
+
+    # The hunk dereferences netcontext for the uid. If this tree's signature does
+    # not carry it, there is no caller identity here and the hook must not run.
+    if ! has_params "$sig" netcontext; then
+        H5_SKIP="dns_getaddrinfo() has no netcontext parameter, so there is no uid to attribute the answer to"
+        return 1
+    fi
+
+    # The CALL, not the forward declaration and not the definition: an assignment
+    # from getanswer(). Exactly one, or we are guessing which answer we filter.
+    calls="$(grep -nE '=[[:space:]]*getanswer[[:space:]]*\(' "$GAI" | wc -l | tr -d ' ')"
+    if [ "$calls" != "1" ]; then
+        H5_SKIP="expected exactly one getanswer() call site in getaddrinfo.cpp, found $calls"
+        return 1
+    fi
+    line="$(grep -nE '=[[:space:]]*getanswer[[:space:]]*\(' "$GAI" | cut -d: -f1)"
+    if [ "$line" -le "$brace" ]; then
+        H5_SKIP="the getanswer() call is not inside dns_getaddrinfo()"
+        return 1
+    fi
+
+    # The answer buffer and its length reach us as members of the loop's query
+    # object. Take the object's name from the call rather than assuming `query`,
+    # and require the length member on the SAME line so the two cannot come from
+    # different objects.
+    H5_OBJ="$(sed -n "${line}p" "$GAI" |
+              sed -n 's/.*getanswer[[:space:]]*([[:space:]]*\([A-Za-z_][A-Za-z0-9_]*\)\.answer.*/\1/p')"
+    if [ -z "$H5_OBJ" ]; then
+        H5_SKIP="the getanswer() call does not pass a <obj>.answer buffer: $(sed -n "${line}p" "$GAI" | sed 's/^[[:space:]]*//')"
+        return 1
+    fi
+    if ! sed -n "${line}p" "$GAI" | grep -q "${H5_OBJ}\.n[^A-Za-z0-9_]"; then
+        H5_SKIP="the getanswer() call does not pass ${H5_OBJ}.n as the answer length"
+        return 1
+    fi
+
+    # The hunk sets `he` so that an answer dropped here is indistinguishable from
+    # an answer that legitimately contained nothing.
+    if ! sed -n "${line}p" "$GAI" | grep -q '&he'; then
+        H5_SKIP="the getanswer() call does not pass &he, so there is no herrno to set"
+        return 1
+    fi
+    grep -q 'HOST_NOT_FOUND' "$GAI" || {
+        H5_SKIP="HOST_NOT_FOUND is not used anywhere in getaddrinfo.cpp"
+        return 1
+    }
+    return 0
+}
+
+if h5_locate; then
+    H5_ON=1
+    info "H5 answer hook anchors on the getanswer($H5_OBJ.answer, ...) call in getaddrinfo.cpp"
+else
+    warn "H5 SKIPPED — $H5_SKIP.
+             H1/H2/H3/H4 are unaffected. What is lost is CNAME uncloaking: a
+             tracker served under a first-party name still resolves, and the
+             Advanced screen's switch will have no effect."
+fi
+
 if [ "$MODE" = check ]; then
     h3_applied=1
     if [ "$H3_ON" = 1 ]; then
         already "$H3_FILE" && [ -f "$DNS/nullroute/NrResSend.cpp" ] || h3_applied=0
     fi
+    h5_applied=1
+    if [ "$H5_ON" = 1 ]; then
+        grep -q 'nr::cnameBlocked(' "$GAI" 2>/dev/null &&
+            [ -f "$DNS/nullroute/NrCname.cpp" ] || h5_applied=0
+    fi
     if already "$GAI" && already "$GHN" && already "$BP" \
-       && [ -f "$DNS/nullroute/NrFilter.cpp" ] && [ "$h3_applied" = 1 ]; then
+       && [ -f "$DNS/nullroute/NrFilter.cpp" ] && [ "$h3_applied" = 1 ] \
+       && [ "$h5_applied" = 1 ]; then
         echo
         if [ "$H3_ON" = 1 ]; then echo "OK — patch is applied (H1 H2 H3 H4)."
         else                      echo "OK — patch is applied (H1 H2 H4; H3 skipped)."; fi
+        if [ "$H5_ON" = 1 ]; then echo "     H5 (CNAME uncloaking) applied."
+        else                      echo "     H5 (CNAME uncloaking) SKIPPED: $H5_SKIP"; fi
         exit 0
     fi
     echo; echo "NOT APPLIED (all applicable hook sites located successfully; run without --check to apply)."
@@ -424,7 +528,7 @@ if already "$WORK/Android.bp"; then
     info "Android.bp already patched"
 else
     bp_add_array "$WORK/Android.bp" libnetd_resolv srcs \
-        '"nullroute/NrFilter.cpp", "nullroute/NrRingWriter.cpp", "nullroute/NrResSend.cpp",'
+        '"nullroute/NrFilter.cpp", "nullroute/NrRingWriter.cpp", "nullroute/NrResSend.cpp", "nullroute/NrCname.cpp",'
     # libnrformat_headers is the SINGLE source of truth for the on-disk format.
     # There is deliberately no copied header in this tree: two byte-identical
     # copies drift the first time one repo is rebased and the other is not, and
@@ -508,6 +612,79 @@ EOF
     fi
     insert_include "$WORK/getaddrinfo.cpp" '#include "nullroute/nr_hook.h"'
     info "getaddrinfo.cpp: H1 + H4 + include"
+fi
+
+# --- getaddrinfo.cpp: H5 ---------------------------------------------------
+#
+# Staged AFTER H1/H4 and anchored by a fresh grep of the STAGED file, because
+# those two have already shifted every line number below them. Its own marker
+# means re-running is still a no-op even though getaddrinfo.cpp is by now
+# `already` patched for a different hunk.
+if [ "$H5_ON" = 1 ]; then
+    if grep -q 'nr::cnameBlocked(' "$WORK/getaddrinfo.cpp"; then
+        info "getaddrinfo.cpp already carries H5"
+    else
+        h5_line="$(grep -nE '=[[:space:]]*getanswer[[:space:]]*\(' "$WORK/getaddrinfo.cpp" |
+                   cut -d: -f1)"
+        if [ -z "$h5_line" ] || [ "$(printf '%s\n' "$h5_line" | wc -l | tr -d ' ')" != "1" ]; then
+            die "the getanswer() call went missing from the staged getaddrinfo.cpp — the tree was NOT modified"
+        fi
+
+        cat > "$WORK/h5.txt" <<EOF
+$BEGIN_MARK
+#ifdef NULLROUTE_ENABLED
+        // H5. The answer hook. H1 has already cleared the QUESTION, so anything
+        // caught here is a name that only became visible in the REPLY: a
+        // CNAME-cloaked tracker, served under a first-party subdomain no
+        // blocklist can carry. nullroute/NrCname.h explains the shape.
+        //
+        // Guarded like every other hook site: this runs inside netd, whose init
+        // stanza carries \`onrestart restart zygote\`, so a null deref is a boot
+        // loop rather than a failed lookup.
+        //
+        // OFF unless NrControl::cname_uncloak is set — the default device pays
+        // one relaxed byte load per answer for this line and nothing else.
+        //
+        // Dropping is a \`continue\`, not a return: the sibling A/AAAA query in
+        // this loop is a separate answer and gets judged on its own bytes.
+        // Setting \`he\` makes a dropped answer indistinguishable from one that
+        // legitimately carried nothing, which is what the code below already
+        // knows how to report.
+        //
+        // The length is clamped to the buffer's own size and not merely to zero.
+        // \`${H5_OBJ}.n\` is a received byte count, and the ONE thing the parser
+        // cannot defend itself against is being handed a length longer than the
+        // allocation it was pointed at. Asserting that here costs a compare and
+        // removes the question entirely.
+        if (netcontext != nullptr &&
+            nr::cnameBlocked(${H5_OBJ}.answer.data(),
+                             (${H5_OBJ}.n > 0 &&
+                              (size_t)${H5_OBJ}.n <= ${H5_OBJ}.answer.size())
+                                     ? (size_t)${H5_OBJ}.n
+                                     : (size_t)0,
+                             netcontext->uid)) {
+            he = HOST_NOT_FOUND;
+            continue;
+        }
+#endif
+$END_MARK
+EOF
+        insert_after_file "$WORK/getaddrinfo.cpp" "$((h5_line - 1))" "$WORK/h5.txt"
+
+        # The include is fenced SEPARATELY and must not land inside H1's fence:
+        # --revert's stripper is one boolean, so a nested BEGIN/END pair would
+        # leave a stray marker behind and the revert would stop being byte-exact.
+        # So skip past H1's END if the last #include is the one it inserted.
+        h5_inc="$(grep -n '^#include' "$WORK/getaddrinfo.cpp" | tail -1 | cut -d: -f1)"
+        [ -n "$h5_inc" ] || die "staged getaddrinfo.cpp has no #include block"
+        if sed -n "$((h5_inc + 1))p" "$WORK/getaddrinfo.cpp" | grep -q 'NULLROUTE-END'; then
+            h5_inc=$((h5_inc + 1))
+        fi
+        printf '%s\n%s\n%s\n' "$BEGIN_MARK" '#include "nullroute/NrCname.h"' "$END_MARK" \
+            > "$WORK/h5inc.txt"
+        insert_after_file "$WORK/getaddrinfo.cpp" "$h5_inc" "$WORK/h5inc.txt"
+        info "getaddrinfo.cpp: H5 + include"
+    fi
 fi
 
 # --- gethnamaddr.cpp: H2 ---------------------------------------------------
@@ -605,6 +782,7 @@ check_staged "$WORK/getaddrinfo.cpp" 'nr::hostsLayerSuperseded'  'the H4 hunk'
 check_staged "$WORK/getaddrinfo.cpp" 'nullroute/nr_hook.h'       'the include'
 check_staged "$WORK/gethnamaddr.cpp" 'nr::hook(name'             'the H2 hunk'
 check_staged "$WORK/gethnamaddr.cpp" 'nullroute/nr_hook.h'       'the include'
+check_staged "$WORK/Android.bp"      'nullroute/NrCname.cpp'     'the H5 srcs entry'
 
 # Exactly one hook per site, no matter how many times this has been run.
 IDEMPOTENCY='getaddrinfo.cpp:nr::hook(hostname gethnamaddr.cpp:nr::hook(name'
@@ -613,6 +791,25 @@ if [ "$H3_ON" = 1 ]; then
     check_staged "$H3_STAGED" 'nullroute/nr_wire.h'  'the H3 include'
     IDEMPOTENCY="$IDEMPOTENCY $(basename "$H3_FILE"):nr::resNSend("
 fi
+if [ "$H5_ON" = 1 ]; then
+    check_staged "$WORK/getaddrinfo.cpp" 'nr::cnameBlocked('     'the H5 hunk'
+    check_staged "$WORK/getaddrinfo.cpp" 'nullroute/NrCname.h'   'the H5 include'
+    IDEMPOTENCY="$IDEMPOTENCY getaddrinfo.cpp:nr::cnameBlocked("
+fi
+
+# --revert strips everything between a BEGIN and the next END with a single
+# boolean, so one fence nested inside another would leave a stray marker behind
+# and revert would stop being byte-exact. getaddrinfo.cpp now carries three
+# separate fences (H1, H4, H5) plus two includes, which is where that could first
+# happen — so assert it cannot rather than trusting the insertion order.
+for f in getaddrinfo.cpp gethnamaddr.cpp; do
+    awk -v b="$BEGIN_MARK" -v e="$END_MARK" '
+        index($0, b) { if (open) { exit 3 } open = 1; next }
+        index($0, e) { if (!open) { exit 4 } open = 0 }
+        END { if (open) exit 5 }
+    ' "$WORK/$f" || die "staged $f has unbalanced or nested NULLROUTE markers — the tree was NOT modified"
+done
+
 for pair in $IDEMPOTENCY; do
     f="${pair%%:*}"; n="${pair#*:}"
     c="$(grep -c "$n" "$WORK/$f" || true)"
@@ -659,6 +856,12 @@ if [ "$H3_ON" = 1 ]; then
     echo "OK — patch applied (H1 H2 H3 H4)."
 else
     echo "OK — patch applied (H1 H2 H4). H3 SKIPPED: $H3_SKIP"
+fi
+if [ "$H5_ON" = 1 ]; then
+    echo "     H5 (CNAME uncloaking) applied. It stays inert until the Advanced"
+    echo "     screen sets NrControl::cname_uncloak."
+else
+    echo "     H5 (CNAME uncloaking) SKIPPED: $H5_SKIP"
 fi
 cat <<'DONE'
 
