@@ -11,7 +11,6 @@
     <item android:id="@+id/menu_categories" android:title="@string/tab_categories" />
     <item android:id="@+id/menu_sources"    android:title="@string/tab_sources" />
     <item android:id="@+id/menu_log"        android:title="@string/tab_log" />
-    <item android:id="@+id/menu_deep"       android:title="@string/tab_deep" />
     <item android:id="@+id/menu_selftest"   android:title="@string/tab_selftest" />
     <item android:id="@+id/menu_advanced"   android:title="@string/tab_advanced" />
     <item android:id="@+id/menu_settings"   android:title="@string/tab_settings" />

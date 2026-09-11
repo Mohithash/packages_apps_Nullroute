@@ -106,6 +106,18 @@
     <uses-permission android:name="android.permission.REAL_GET_TASKS" />
 
     <!--
+        Read-only visibility of whatever handles web links, so "Test my blocking"
+        can name the browser in its third lane. This grants no ability to talk to
+        it; the URL is launched with a plain ACTION_VIEW either way.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+    </queries>
+
+    <!--
         Declared here as well as mapped in rom/nullroute-gid.xml so the
         permission exists even if the etc/permissions file is dropped from a
         build; the gid mapping is what actually does the work. `signature` is

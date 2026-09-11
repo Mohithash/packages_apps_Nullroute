@@ -2,7 +2,7 @@
 <resources>
 
     <string name="app_name">Nullroute</string>
-    <string name="settings_entry_summary">Block ad, tracker and malware domains</string>
+    <string name="settings_entry_summary">BestROM ad and tracker blocker</string>
 
     <string name="tab_home">Status</string>
     <string name="tab_profile">Profile</string>
@@ -85,7 +85,7 @@
     -->
     <string name="home_scope_header">What this does and does not cover</string>
     <string name="scope_sentence">Nullroute blocks ad, tracker and malware domains for apps that use Android\'s system resolver. It does not block ads served from the same domain as the content (YouTube, Instagram, Spotify), and it does not filter Chrome or other apps that run their own DNS — turn on Deep mode for those.</string>
-    <string name="scope_deep_note">Deep mode is not part of this build yet. Until it ships, Chrome, WebView and any app with its own DNS are not filtered at all.</string>
+    <string name="scope_deep_note">Deep mode is the bottom-bar tab of the same name. It runs a DNS-only VPN so Chrome, WebView and apps with their own resolver are filtered too. Turn it off if name resolution fails.</string>
 
     <string name="action_pause">Pause filtering</string>
     <string name="action_resume">Resume filtering</string>

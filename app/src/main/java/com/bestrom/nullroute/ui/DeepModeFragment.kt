@@ -15,7 +15,6 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import com.bestrom.nullroute.NullrouteApp
 import com.bestrom.nullroute.R
-import com.bestrom.nullroute.core.Paths
 import com.bestrom.nullroute.core.Probes
 import com.bestrom.nullroute.deep.DeepVpnService
 import com.bestrom.nullroute.deep.DeepWatchdog
@@ -325,40 +324,12 @@ class DeepModeFragment : Fragment() {
 
     // ---- the watchdog's failure list ---------------------------------------
 
-    /**
-     * The failure timestamps still inside the watchdog's window.
-     *
-     * Read directly out of the Deep-mode preferences because [DeepWatchdog]
-     * exposes the *reason* it disabled but not the *history* behind it, and this
-     * screen is the one place that history means something. Read-only, and
-     * tolerant of anything it finds: the same file is written by the tunnel
-     * thread on a path where the process may be about to die, so a half-written
-     * or absent value is a normal outcome and not an error to report.
-     *
-     * The file and key names are duplicated from `DeepWatchdog`'s private
-     * constants. docs/needs-deep.md asks for a `failureHistory()` accessor there
-     * so this duplication can be deleted; until it exists, a wrong name here
-     * degrades to "no history", never to a wrong history.
-     */
-    private fun failureTimestamps(context: Context): List<Long> {
-        val prefs = runCatching {
-            Paths.de(context).getSharedPreferences(DEEP_PREFS, Context.MODE_PRIVATE)
-        }.getOrNull() ?: return emptyList()
-
-        val raw = runCatching { prefs.getString(DEEP_KEY_FAILURES, "") }.getOrNull().orEmpty()
-        if (raw.isEmpty()) return emptyList()
-
-        val now = System.currentTimeMillis()
-        return raw.split(',').mapNotNull { it.trim().toLongOrNull() }
-            .filter { it in (now - DeepWatchdog.WINDOW_MS)..now }
-    }
+    private fun failureTimestamps(context: Context): List<Long> =
+        DeepWatchdog.failureHistory(context)
 
     private fun colour(res: Int): Int = ContextCompat.getColor(requireContext(), res)
 
     companion object {
         private const val RC_VPN_CONSENT = 4001
-
-        private const val DEEP_PREFS = "nullroute_deep"
-        private const val DEEP_KEY_FAILURES = "failures"
     }
 }

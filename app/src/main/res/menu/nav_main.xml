@@ -13,6 +13,10 @@
         android:icon="@drawable/ic_update"
         android:title="@string/tab_update" />
     <item
+        android:id="@+id/nav_deep"
+        android:icon="@drawable/ic_deep"
+        android:title="@string/tab_deep" />
+    <item
         android:id="@+id/nav_diagnostics"
         android:icon="@drawable/ic_diagnostics"
         android:title="@string/tab_diagnostics" />

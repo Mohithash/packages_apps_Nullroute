@@ -7,15 +7,13 @@ import android.view.MenuItem
 import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
 import com.bestrom.nullroute.R
-import com.bestrom.nullroute.qs.TilePrefsActivity
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.bottomnavigation.BottomNavigationView
 
 /**
- * Four tabs — Home, Profile, Update, Diagnostics — plus a toolbar overflow for
- * the ten screens past them. A BottomNavigationView holds five destinations at
- * most, so the overflow is not a stylistic choice; the alternative is hiding
- * whole features behind a nav bar that cannot show them.
+ * Five tabs — Home, Profile, Update, Deep mode, Diagnostics — plus a toolbar
+ * overflow for the screens past them. A BottomNavigationView holds five
+ * destinations at most, so the overflow is not a stylistic choice.
  *
  * Overflow destinations are PUSHED onto the back stack rather than swapped like
  * a tab, so `back` returns to the tab the user was on instead of exiting.
@@ -58,7 +56,6 @@ class MainActivity : AppCompatActivity() {
             R.id.menu_categories -> CategoriesFragment()
             R.id.menu_sources -> SourceEditFragment()
             R.id.menu_log -> LogFragment()
-            R.id.menu_deep -> DeepModeFragment()
             R.id.menu_selftest -> SelfTestFragment()
             R.id.menu_advanced -> AdvancedFragment()
             R.id.menu_settings -> SettingsFragment()
@@ -93,6 +90,7 @@ class MainActivity : AppCompatActivity() {
         val fragment: Fragment = when (tab) {
             TAB_PROFILE -> ProfileFragment()
             TAB_UPDATE -> UpdateFragment()
+            TAB_DEEP -> DeepModeFragment()
             TAB_DIAGNOSTICS -> DiagnosticsFragment()
             else -> HomeFragment()
         }
@@ -112,6 +110,7 @@ class MainActivity : AppCompatActivity() {
     private fun tabForMenuId(id: Int): Int = when (id) {
         R.id.nav_profile -> TAB_PROFILE
         R.id.nav_update -> TAB_UPDATE
+        R.id.nav_deep -> TAB_DEEP
         R.id.nav_diagnostics -> TAB_DIAGNOSTICS
         else -> TAB_HOME
     }
@@ -119,6 +118,7 @@ class MainActivity : AppCompatActivity() {
     private fun menuIdForTab(tab: Int): Int = when (tab) {
         TAB_PROFILE -> R.id.nav_profile
         TAB_UPDATE -> R.id.nav_update
+        TAB_DEEP -> R.id.nav_deep
         TAB_DIAGNOSTICS -> R.id.nav_diagnostics
         else -> R.id.nav_home
     }
@@ -126,6 +126,7 @@ class MainActivity : AppCompatActivity() {
     private fun titleForTab(tab: Int): Int = when (tab) {
         TAB_PROFILE -> R.string.tab_profile
         TAB_UPDATE -> R.string.tab_update
+        TAB_DEEP -> R.string.deepui_title
         TAB_DIAGNOSTICS -> R.string.tab_diagnostics
         else -> R.string.app_name
     }
@@ -137,5 +138,7 @@ class MainActivity : AppCompatActivity() {
         const val TAB_PROFILE = 1
         const val TAB_UPDATE = 2
         const val TAB_DIAGNOSTICS = 3
+        /** Keep at 4 so older EXTRA_OPEN_TAB intents for Diagnostics stay valid. */
+        const val TAB_DEEP = 4
     }
 }

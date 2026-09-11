@@ -61,6 +61,16 @@ class HomeFragment : Fragment() {
 
         pauseButton.setOnClickListener { togglePause() }
         recheckButton.setOnClickListener { refresh() }
+        view.findViewById<MaterialButton>(R.id.button_selftest).setOnClickListener {
+            // The container rather than R.id.fragment_container: Home is hosted
+            // by MainActivity and by SettingsEntryActivity, which use different
+            // hosts for the same fragment.
+            val containerId = (requireView().parent as? View)?.id ?: return@setOnClickListener
+            parentFragmentManager.beginTransaction()
+                .replace(containerId, SelfTestFragment())
+                .addToBackStack(null)
+                .commit()
+        }
     }
 
     override fun onResume() {

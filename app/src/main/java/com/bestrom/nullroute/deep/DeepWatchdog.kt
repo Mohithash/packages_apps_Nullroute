@@ -175,6 +175,19 @@ object DeepWatchdog {
     /** The last failure message, for Diagnostics. Not a status. */
     fun lastError(context: Context): String? = prefs(context).getString(KEY_LAST_ERROR, null)
 
+    /**
+     * Failure timestamps still inside [WINDOW_MS], oldest first. For the
+     * Deep-mode screen, which has to explain a switch that moved by itself.
+     */
+    fun failureHistory(context: Context): List<Long> {
+        val now = System.currentTimeMillis()
+        return (prefs(context).getString(KEY_FAILURES, "") ?: "")
+            .split(',')
+            .mapNotNull { it.trim().toLongOrNull() }
+            .filter { it in (now - WINDOW_MS)..now }
+            .sorted()
+    }
+
     // ---- the attempt marker -------------------------------------------------
 
     /**
