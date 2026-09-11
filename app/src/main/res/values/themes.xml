@@ -1,19 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Material3 DayNight, with no colour overrides: on a Lineage-derived ROM the
-    user has already chosen an accent, and a system component that ignores it
-    looks like a third-party app that wandered into Settings.
+    BestROM monochrome Material3. Neutral greys, no purple accent — matches
+    Powerhub / Edge dark surfaces rather than a stock Material You seed.
 -->
 <resources>
 
-    <!--
-        No system-bar colour overrides. From API 35 the platform draws edge to
-        edge unconditionally and `android:statusBarColor` /
-        `android:navigationBarColor` are ignored; setting them would be dead
-        weight that reads like configuration. Material3 handles the bar
-        appearance from the theme's light/dark state on its own.
-    -->
-    <style name="Theme.Nullroute" parent="Theme.Material3.DayNight.NoActionBar" />
+    <style name="Theme.Nullroute" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/nr_brand_primary</item>
+        <item name="colorOnPrimary">@color/nr_brand_on_primary</item>
+        <item name="colorPrimaryContainer">@color/nr_brand_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/nr_brand_on_primary_container</item>
+        <item name="colorSecondary">@color/nr_brand_secondary</item>
+        <item name="colorOnSecondary">@color/nr_brand_on_secondary</item>
+        <item name="colorSecondaryContainer">@color/nr_brand_secondary_container</item>
+        <item name="colorOnSecondaryContainer">@color/nr_brand_on_secondary_container</item>
+        <item name="colorTertiary">@color/nr_brand_tertiary</item>
+        <item name="colorOnTertiary">@color/nr_brand_on_tertiary</item>
+        <item name="android:colorBackground">@color/nr_brand_background</item>
+        <item name="colorSurface">@color/nr_brand_surface</item>
+        <item name="colorOnSurface">@color/nr_brand_on_surface</item>
+        <item name="colorSurfaceVariant">@color/nr_brand_surface_variant</item>
+        <item name="colorOnSurfaceVariant">@color/nr_brand_on_surface_variant</item>
+        <item name="colorOutline">@color/nr_brand_outline</item>
+    </style>
 
     <style name="Nullroute.CardTitle" parent="TextAppearance.Material3.TitleMedium" />
 

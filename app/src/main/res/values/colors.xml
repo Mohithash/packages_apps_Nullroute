@@ -1,13 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Status accent colours.
-
-    Three states, three colours, and no green for anything that is not fully
-    verified: "Limited" and "Paused" share the amber because in both cases the
-    user is less protected than they may think. Contrast is checked against the
-    Material3 surface in both light and dark (see values-night).
+    BestROM light palette: cool greys + one status triad. Status colours keep
+    semantic green/amber/red; brand chrome stays monochrome.
 -->
 <resources>
+    <color name="nr_brand_primary">#FF1A1A1A</color>
+    <color name="nr_brand_on_primary">#FFFFFFFF</color>
+    <color name="nr_brand_primary_container">#FFE8E8E8</color>
+    <color name="nr_brand_on_primary_container">#FF1A1A1A</color>
+    <color name="nr_brand_secondary">#FF5A5A5A</color>
+    <color name="nr_brand_on_secondary">#FFFFFFFF</color>
+    <color name="nr_brand_secondary_container">#FFF0F0F0</color>
+    <color name="nr_brand_on_secondary_container">#FF2A2A2A</color>
+    <color name="nr_brand_tertiary">#FF6E7781</color>
+    <color name="nr_brand_on_tertiary">#FFFFFFFF</color>
+    <color name="nr_brand_background">#FFF7F7F7</color>
+    <color name="nr_brand_surface">#FFFFFFFF</color>
+    <color name="nr_brand_on_surface">#FF121212</color>
+    <color name="nr_brand_surface_variant">#FFECECEC</color>
+    <color name="nr_brand_on_surface_variant">#FF5A5A5A</color>
+    <color name="nr_brand_outline">#FFB0B0B0</color>
+
     <color name="nr_status_ok">#FF1B873B</color>
     <color name="nr_status_warn">#FFB26A00</color>
     <color name="nr_status_bad">#FFBA1A1A</color>
