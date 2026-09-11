@@ -43,6 +43,11 @@ on post-fs-data
     mkdir /data/misc/nullroute/ctl 0770 system misc
     mkdir /data/misc/nullroute/log 0770 system misc
     mkdir /data/misc/nullroute/priv 0770 system misc
+    # Scratch dirs the app used to mkdir at Update time. Creating them here
+    # removes one SELinux create hop on first Update after flash.
+    mkdir /data/misc/nullroute/priv/build 0770 system misc
+    mkdir /data/misc/nullroute/priv/cache 0770 system misc
+    mkdir /data/misc/nullroute/priv/profiles 0770 system misc
 
     # An OTA that introduces or renames these types finds the directories
     # already present from the previous boot and therefore does NOT relabel them
