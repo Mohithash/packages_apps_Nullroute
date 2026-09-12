@@ -355,6 +355,7 @@ android_app {
     jni_libs: ["libnrjni"],
 
     static_libs: [
+        "BestromUiTokens",
         "androidx.core_core-ktx",
         "androidx.appcompat_appcompat",
         "androidx.recyclerview_recyclerview",

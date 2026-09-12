@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    BestROM monochrome Material3. Neutral greys, no purple accent — matches
-    Powerhub / Edge dark surfaces rather than a stock Material You seed.
+    BestROM Nothing-adjacent Material3: Space Grotesk titles, Doto status,
+    22dp cards via bestrom_ui_card_corner_radius.
 -->
 <resources>
 
@@ -22,20 +22,30 @@
         <item name="colorSurfaceVariant">@color/nr_brand_surface_variant</item>
         <item name="colorOnSurfaceVariant">@color/nr_brand_on_surface_variant</item>
         <item name="colorOutline">@color/nr_brand_outline</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@color/nr_brand_background</item>
+        <item name="materialCardViewStyle">@style/Widget.Nullroute.Card</item>
     </style>
 
-    <style name="Nullroute.CardTitle" parent="TextAppearance.Material3.TitleMedium" />
-
-    <style name="Nullroute.StatusTitle" parent="TextAppearance.Material3.HeadlineSmall" />
-
-    <style name="Nullroute.Body" parent="TextAppearance.Material3.BodyMedium">
-        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
+    <style name="Widget.Nullroute.Card" parent="Widget.Material3.CardView.Elevated">
+        <item name="cardCornerRadius">@dimen/bestrom_ui_card_corner_radius</item>
+        <item name="cardElevation">0dp</item>
+        <item name="strokeWidth">0dp</item>
+        <item name="cardBackgroundColor">@color/nr_brand_surface</item>
     </style>
 
-    <style name="Nullroute.Label" parent="TextAppearance.Material3.LabelLarge" />
+    <style name="Nullroute.CardTitle" parent="TextAppearance.BestromUi.Title" />
 
-    <style name="Nullroute.Caption" parent="TextAppearance.Material3.BodySmall">
-        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
+    <style name="Nullroute.StatusTitle" parent="TextAppearance.BestromUi.Status" />
+
+    <style name="Nullroute.Body" parent="TextAppearance.BestromUi.Body" />
+
+    <style name="Nullroute.Label" parent="TextAppearance.BestromUi.Title">
+        <item name="android:textSize">13sp</item>
+    </style>
+
+    <style name="Nullroute.Caption" parent="TextAppearance.BestromUi.Body">
+        <item name="android:textSize">12sp</item>
     </style>
 
 </resources>

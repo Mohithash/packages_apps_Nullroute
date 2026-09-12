@@ -1,25 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    BestROM light palette: cool greys + one status triad. Status colours keep
-    semantic green/amber/red; brand chrome stays monochrome.
+    BestROM / Nothing-adjacent mono. Surfaces alias BestromUiTokens so Nullroute
+    tracks Settings homepage greys. Status triad stays chromatic for glance.
 -->
 <resources>
-    <color name="nr_brand_primary">#FF1A1A1A</color>
-    <color name="nr_brand_on_primary">#FFFFFFFF</color>
-    <color name="nr_brand_primary_container">#FFE8E8E8</color>
-    <color name="nr_brand_on_primary_container">#FF1A1A1A</color>
-    <color name="nr_brand_secondary">#FF5A5A5A</color>
-    <color name="nr_brand_on_secondary">#FFFFFFFF</color>
-    <color name="nr_brand_secondary_container">#FFF0F0F0</color>
-    <color name="nr_brand_on_secondary_container">#FF2A2A2A</color>
-    <color name="nr_brand_tertiary">#FF6E7781</color>
-    <color name="nr_brand_on_tertiary">#FFFFFFFF</color>
-    <color name="nr_brand_background">#FFF7F7F7</color>
-    <color name="nr_brand_surface">#FFFFFFFF</color>
-    <color name="nr_brand_on_surface">#FF121212</color>
-    <color name="nr_brand_surface_variant">#FFECECEC</color>
-    <color name="nr_brand_on_surface_variant">#FF5A5A5A</color>
-    <color name="nr_brand_outline">#FFB0B0B0</color>
+    <color name="nr_brand_primary">@color/bestrom_ui_primary</color>
+    <color name="nr_brand_on_primary">@color/bestrom_ui_on_primary</color>
+    <color name="nr_brand_primary_container">@color/bestrom_ui_surface_highest</color>
+    <color name="nr_brand_on_primary_container">@color/bestrom_ui_on_surface</color>
+    <color name="nr_brand_secondary">@color/bestrom_ui_on_surface_variant</color>
+    <color name="nr_brand_on_secondary">@color/bestrom_ui_on_primary</color>
+    <color name="nr_brand_secondary_container">@color/bestrom_ui_surface_high</color>
+    <color name="nr_brand_on_secondary_container">@color/bestrom_ui_on_surface</color>
+    <color name="nr_brand_tertiary">@color/bestrom_ui_muted</color>
+    <color name="nr_brand_on_tertiary">@color/bestrom_ui_on_primary</color>
+    <color name="nr_brand_background">@color/bestrom_ui_page_bg</color>
+    <color name="nr_brand_surface">@color/bestrom_ui_surface</color>
+    <color name="nr_brand_on_surface">@color/bestrom_ui_on_surface</color>
+    <color name="nr_brand_surface_variant">@color/bestrom_ui_surface_high</color>
+    <color name="nr_brand_on_surface_variant">@color/bestrom_ui_on_surface_variant</color>
+    <color name="nr_brand_outline">@color/bestrom_ui_outline</color>
 
     <color name="nr_status_ok">#FF1B873B</color>
     <color name="nr_status_warn">#FFB26A00</color>

@@ -17,7 +17,7 @@
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            app:cardCornerRadius="16dp">
+            app:cardCornerRadius="@dimen/bestrom_ui_card_corner_radius">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -82,7 +82,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            app:cardCornerRadius="16dp">
+            app:cardCornerRadius="@dimen/bestrom_ui_card_corner_radius">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -167,7 +167,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            app:cardCornerRadius="16dp">
+            app:cardCornerRadius="@dimen/bestrom_ui_card_corner_radius">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -211,7 +211,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
             android:layout_marginBottom="16dp"
-            app:cardCornerRadius="16dp">
+            app:cardCornerRadius="@dimen/bestrom_ui_card_corner_radius">
 
             <LinearLayout
                 android:layout_width="match_parent"
