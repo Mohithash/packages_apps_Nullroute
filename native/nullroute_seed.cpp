@@ -100,7 +100,9 @@
 #define NR_XZ_SDK 1
 #include <stdlib.h>
 
+#include <7zCrc.h>
 #include <Xz.h>
+#include <XzCrc64.h>
 #else
 #error "nullroute_seed needs an xz decoder: xz-utils liblzma (<lzma.h>) or the \
 LZMA SDK (<Xz.h>). This tree has neither. Either (a) import external/xz-utils \
@@ -306,6 +308,17 @@ const ISzAlloc kSdkAlloc = {sdk_alloc, sdk_free};
 
 bool xz_decode(const std::string& in, std::string* out, std::string* err) {
     static const size_t kMaxOut = 64u << 20;
+
+    /* XzUnpacker_Code returns SZ_ERROR_DATA on a valid stream until these
+     * tables exist. libunwindstack and simpleperf both initialise them; without
+     * that, every baked baseline looks corrupt and the seeder publishes
+     * nobaseline, so netd stays at nomap:ENOENT. */
+    static bool crc_ready = false;
+    if (!crc_ready) {
+        CrcGenerateTable();
+        Crc64GenerateTable();
+        crc_ready = true;
+    }
 
     CXzUnpacker st;
     XzUnpacker_Construct(&st, &kSdkAlloc);
